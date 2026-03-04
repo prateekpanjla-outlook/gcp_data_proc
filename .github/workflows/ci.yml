@@ -1,0 +1,216 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: us-central1
+
+jobs:
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install ruff mypy
+      - name: Run ruff linter
+        run: ruff check src/ tests/
+      - name: Run ruff formatter check
+        run: ruff format --check src/ tests/
+      - name: Type check with mypy
+        run: mypy src/ --ignore-missing-imports || true
+
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements.github.txt
+          pip install -r requirements.hn.txt
+          pip install pytest pytest-cov pytest-mock
+      - name: Run unit tests
+        run: |
+          pytest tests/github_archive/ tests/hacker_news/ tests/shared/ \
+            --cov=src/ \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            -v
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: github.event_name != 'pull_request'
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+
+  test-integration:
+    name: Integration Tests (Emulators)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Start emulators
+        run: |
+          docker compose -f docker-compose.test.yml up -d bigquery gcs
+      - name: Wait for emulators
+        run: |
+          sleep 10
+          curl -f http://localhost:9050 || echo "BigQuery emulator ready"
+          curl -f http://localhost:4443 || echo "GCS emulator ready"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements.github.txt
+          pip install pytest pytest-cov
+      - name: Run integration tests
+        env:
+          BIGQUERY_EMULATOR_HOST: localhost:9050
+        run: |
+          pytest tests/integration/ -v --timeout=60
+      - name: Stop emulators
+        if: always()
+        run: docker compose -f docker-compose.test.yml down
+
+  build-github-processor:
+    name: Build GitHub Archive Processor Image
+    runs-on: ubuntu-latest
+    needs: [lint, test-unit]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    outputs:
+      image: ${{ steps.build.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: build
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - name: Build and push image
+        run: |
+          cd src/github_archive
+          gcloud builds submit --tag gcr.io/$PROJECT_ID/github-archive-processor:${{ github.sha }} .
+          gcloud container images add-tag gcr.io/$PROJECT_ID/github-archive-processor:${{ github.sha }} gcr.io/$PROJECT_ID/github-archive-processor:latest -q
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+
+  build-hn-processor:
+    name: Build Hacker News Processor Image
+    runs-on: ubuntu-latest
+    needs: [lint, test-unit]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    outputs:
+      image: ${{ steps.build.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: build
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - name: Build and push image
+        run: |
+          cd src/hacker_news
+          gcloud builds submit --tag gcr.io/$PROJECT_ID/hn-processor:${{ github.sha }} .
+          gcloud container images add-tag gcr.io/$PROJECT_ID/hn-processor:${{ github.sha }} gcr.io/$PROJECT_ID/hn-processor:latest -q
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+
+  deploy:
+    name: Deploy to Cloud Run
+    runs-on: ubuntu-latest
+    needs: [build-github-processor, build-hn-processor]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://console.cloud.google.com/run
+    steps:
+      - uses: actions/checkout@v4
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - name: Deploy GitHub Archive Processor
+        run: |
+          gcloud run deploy github-archive-processor \
+            --image gcr.io/$PROJECT_ID/github-archive-processor:${{ github.sha }} \
+            --region $REGION \
+            --memory 2Gi \
+            --cpu 1 \
+            --timeout 10m \
+            --max-instances 100 \
+            --concurrency 50 \
+            --no-allow-unauthenticated \
+            --set-env-vars=BUCKET_NAME=${PROJECT_ID}-data-pipeline \
+            --set-env-vars=DATASET_ID=github_dataset \
+            --set-env-vars=PROJECT_ID=$PROJECT_ID
+      - name: Deploy Hacker News Processor
+        run: |
+          gcloud run deploy hn-processor \
+            --image gcr.io/$PROJECT_ID/hn-processor:${{ github.sha }} \
+            --region $REGION \
+            --memory 1Gi \
+            --cpu 1 \
+            --timeout 10m \
+            --max-instances 50 \
+            --concurrency 20 \
+            --no-allow-unauthenticated \
+            --set-env-vars=BUCKET_NAME=${PROJECT_ID}-data-pipeline \
+            --set-env-vars=DATASET_ID=hacker_news \
+            --set-env-vars=PROJECT_ID=$PROJECT_ID
+      - name: Deploy Hacker News Fetcher
+        run: |
+          gcloud run deploy hn-fetcher \
+            --image gcr.io/$PROJECT_ID/hn-fetcher:${{ github.sha }} \
+            --region $REGION \
+            --memory 512Mi \
+            --max-instances 10 \
+            --no-allow-unauthenticated
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+
+  terraform-apply:
+    name: Apply Terraform Infrastructure
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: latest
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - name: Terraform Init
+        run: |
+          cd terraform
+          terraform init
+      - name: Terraform Apply
+        run: |
+          cd terraform
+          terraform apply -auto-approve \
+            -var="project_id=$PROJECT_ID" \
+            -var="region=$REGION"
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          REGION: us-central1
