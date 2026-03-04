@@ -123,3 +123,43 @@ variable "enable_logging_export" {
   type        = bool
   default     = false
 }
+
+# Image Configuration
+variable "image_tag" {
+  description = "Docker image tag (use 'latest' for production)"
+  type        = string
+  default     = "latest"
+}
+
+# Alert Configuration
+variable "alerts_enabled" {
+  description = "Enable alert policies"
+  type        = bool
+  default     = true
+}
+
+variable "alert_email" {
+  description = "Email address for alert notifications"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "monitoring_webhook_url" {
+  description = "Webhook URL for monitoring notifications (optional)"
+  type        = string
+  default     = ""
+}
+
+# Access Control (for convenience, use varfiles for sensitive data)
+variable "allowed_ip_ranges" {
+  description = "Allowed IP ranges for Cloud Run invocations (empty = allow all authenticated)"
+  type        = list(string)
+  default     = []
+}
+
+variable "enable_iam_admin" {
+  description = "Enable IAM admin actions (use with caution)"
+  type        = bool
+  default     = false
+}
