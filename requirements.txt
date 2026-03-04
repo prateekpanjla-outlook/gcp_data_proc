@@ -1,0 +1,25 @@
+# Requirements for local development and testing
+
+# Google Cloud clients
+google-cloud-storage>=2.18.0
+google-cloud-bigquery>=3.25.0
+
+# Web framework
+Flask>=3.0.0
+Werkzeug>=3.0.0
+
+# HTTP client
+requests>=2.31.0
+
+# Utilities
+python-dateutil>=2.8.2
+
+# Testing
+pytest>=8.0.0
+pytest-cov>=4.1.0
+pytest-mock>=3.12.0
+
+# Development
+black>=24.0.0
+mypy>=1.8.0
+ruff>=0.1.0

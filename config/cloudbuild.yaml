@@ -1,0 +1,105 @@
+# Cloud Build configuration for GitHub Archive processor
+
+steps:
+  # Build the GitHub Archive processor image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-gh-processor'
+    dir: 'src/github_archive'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/github-archive-processor:${SHORT_SHA}'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/github-archive-processor:latest'
+      - '-f'
+      - 'Dockerfile'
+      - '../..'
+
+  # Build the Hacker News processor image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-hn-processor'
+    dir: 'src/hacker_news'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/hn-processor:${SHORT_SHA}'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/hn-processor:latest'
+      - '-f'
+      - 'Dockerfile'
+      - '../..'
+
+  # Push images
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-images'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/github-archive-processor:${SHORT_SHA}'
+      - 'gcr.io/$PROJECT_ID/github-archive-processor:latest'
+      - 'gcr.io/$PROJECT_ID/hn-processor:${SHORT_SHA}'
+      - 'gcr.io/$PROJECT_ID/hn-processor:latest'
+
+  # Deploy GitHub Archive processor to Cloud Run
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'deploy-gh-processor'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'github-archive-processor'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/github-archive-processor:${SHORT_SHA}'
+      - '--platform'
+      - 'managed'
+      - '--region'
+      - '$_REGION'
+      - '--memory'
+      - '2Gi'
+      - '--cpu'
+      - '1'
+      - '--timeout'
+      - '10m'
+      - '--max-instances'
+      - '100'
+      - '--concurrency'
+      - '50'
+      - '--no-allow-unauthenticated'
+      - '--set-env-vars'
+      - 'BUCKET_NAME=$PROJECT_ID-data-pipeline,DATASET_ID=github_dataset,TABLE_ID=events,PROJECT_ID=$PROJECT_ID'
+
+  # Deploy Hacker News processor to Cloud Run
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'deploy-hn-processor'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'hn-processor'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/hn-processor:${SHORT_SHA}'
+      - '--platform'
+      - 'managed'
+      - '--region'
+      - '$_REGION'
+      - '--memory'
+      - '1Gi'
+      - '--cpu'
+      - '1'
+      - '--timeout'
+      - '10m'
+      - '--max-instances'
+      - '50'
+      - '--concurrency'
+      - '20'
+      - '--no-allow-unauthenticated'
+      - '--set-env-vars'
+      - 'BUCKET_NAME=$PROJECT_ID-data-pipeline,DATASET_ID=hacker_news,PROJECT_ID=$PROJECT_ID'
+
+# Cloud Build substitutions
+substitutions:
+  _REGION: us-central1
+
+# Image names for easier reference
+images:
+  - 'gcr.io/$PROJECT_ID/github-archive-processor:${SHORT_SHA}'
+  - 'gcr.io/$PROJECT_ID/github-archive-processor:latest'
+  - 'gcr.io/$PROJECT_ID/hn-processor:${SHORT_SHA}'
+  - 'gcr.io/$PROJECT_ID/hn-processor:latest'
