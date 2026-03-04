@@ -1,245 +1,367 @@
-# Phase 1: Ingestion - Mermaid Diagram
+# Phase 1: Ingestion - Specification
 
-## Main Flow Diagram
+## Overview
 
-```mermaid
-flowchart TD
-    Start([Phase 1 Start]) --> Init[Initialize<br/>Environment Variables<br/>PROJECT_ID, BUCKET_NAME, REGION]
+Phase 1 is responsible for downloading the hourly GitHub Archive file and landing it in Cloud Storage.
 
-    subgraph Entry_Checks [Entry Conditions]
-        E1[Scheduler deployed?<br/>cron: 30 * * * *]
-        E2[Cloud Run Job deployed?<br/>hn-fetcher]
-        E3[Service Account has<br/>Storage.ObjectCreator?]
-        E4[GitHub Archive reachable?<br/>https://data.gharchive.org/]
-    end
+**Diagrams:**
+- [Main Flow](diagrams/ingestion_01_main_flow.md) - Complete end-to-end flow
+- [Entry Conditions](diagrams/ingestion_02_entry_conditions.md) - Prerequisites
+- [Exit Conditions](diagrams/ingestion_03_exit_conditions.md) - Success criteria
+- [Failure Scenarios](diagrams/ingestion_04_failure_scenarios.md) - Error handling
+- [Sequence Diagram](diagrams/ingestion_05_sequence_diagram.md) - Component interaction
+- [Components](diagrams/ingestion_06_components.md) - Architecture view
+- [Improvements](diagrams/ingestion_07_improvements.md) - Refactoring opportunities
 
-    Init --> Entry_Checks
-    Entry_Checks -->|All Yes| CalcFilename[Step 1:<br/>Calculate Target Filename]
-    Entry_Checks -->|Any No| FailEntry[❌ Entry Failed<br/>Fix Infrastructure]
+---
 
-    subgraph Step1 [Step 1: Calculate Filename]
-        direction TB
-        Calc1[Get current UTC time]
-        Calc2[Subtract 1 hour]
-        Calc3[Format: YYYY-MM-DD-H.json.gz]
-        Calc4[Example:<br/>2025-01-15-14.json.gz]
-        Calc1 --> Calc2 --> Calc3 --> Calc4
-    end
+## High-Level Flow
 
-    CalcFilename --> BuildURL[Step 2:<br/>Build Download URL<br/>https://data.gharchive.org/{filename}]
-
-    subgraph Download [Step 3: Download File]
-        direction TB
-        HTTP[HTTP GET<br/>timeout: 300s]
-        CheckStatus{Status = 200?}
-        CheckStatus -->|Yes| ReadData[Read compressed_data<br/>~1.2 GB in memory ⚠️]
-        CheckStatus -->|404| Wait404[Wait 5 min<br/>File not ready]
-        CheckStatus -->|5xx| Wait5xx[Wait 1 min<br/>Server error]
-        Wait404 -->|Retry| HTTP
-        Wait5xx -->|Retry| HTTP
-    end
-
-    ReadData --> ValidateGzip[Step 4:<br/>Validate Gzip Format<br/>gzip.decompress]
-
-    ValidateGzip -->|Valid| UploadGCS[Step 5:<br/>Upload to Cloud Storage<br/>bucket.blob.upload_from_string]
-    ValidateGzip -->|BadGzipFile| FailValidate[❌ Corrupted File<br/>Skip & Log]
-
-    subgraph Upload [Step 5: Upload to GCS]
-        direction TB
-        SetBlob[blob = bucket.blob<br/>github-archive/raw/{filename}]
-        DoUpload[upload_from_string<br/>content_type=application/gzip]
-        Verify{blob.exists?}
-        DoUpload --> Verify
-    end
-
-    Verify -->|Yes| Success([✅ Phase 1 Success])
-    Verify -->|No| FailUpload[❌ Upload Failed<br/>Check IAM/Network]
-
-    Success --> Trigger[Triggers:<br/>Cloud Storage finalize event<br/>→ Phase 2]
-
-    style Start fill:#e1f5e1
-    style Success fill:#e1f5e1
-    style FailEntry fill:#ffebee
-    style FailValidate fill:#ffebee
-    style FailUpload fill:#ffebee
-    style Trigger fill:#fff3e0
+```
+GitHub Archive (https://data.gharchive.org/)
+        │
+        │ Cloud Scheduler (cron: 30 * * * *)
+        ▼
+Cloud Run Job: hn-fetcher
+        │ downloads file
+        ▼
+Cloud Storage: gs://{project}-data-pipeline/github-archive/raw/YYYY-MM-DD-HH.json.gz
 ```
 
 ---
 
-## Entry Conditions Detail
+## ENTRY Conditions (Pre-requirements)
 
-```mermaid
-graph LR
-    subgraph Entry_Requirements [Entry Conditions]
-        Env[Environment Variables<br/>PROJECT_ID<br/>BUCKET_NAME<br/>REGION]
-        Infra[Infrastructure<br/>Cloud Scheduler<br/>Cloud Run Job<br/>Service Account]
-        External[External Dependencies<br/>GitHub Archive reachable<br/>File exists]
-    end
+### Infrastructure Requirements
 
-    Entry_Requirements --> Ready{Ready to<br/>Start?}
+| Requirement | Type | Description |
+|-------------|------|-------------|
+| `PROJECT_ID` | Env Var | Google Cloud project ID |
+| `BUCKET_NAME` | Env Var | Target Cloud Storage bucket name |
+| `REGION` | Env Var | GCP region (e.g., `us-central1`) |
+| Cloud Scheduler | Resource | Must be configured with hourly schedule |
+| Cloud Run Job | Resource | `hn-fetcher` job must be deployed |
+| Service Account | IAM | Must have `Storage.ObjectCreator` role |
 
-    style Ready fill:#e1f5e1
+### External Dependencies
+
+| Dependency | URL | Availability |
+|------------|-----|--------------|
+| GitHub Archive | `https://data.gharchive.org/` | Public, no auth required |
+| File Format | `{YYYY}-{MM}-{DD}-{HH}.json.gz` | Files available within 1-2 hours |
+
+---
+
+## Process Flow
+
+### Step 1: Calculate Target Filename
+
+```python
+# Current implementation (src/github_archive/main.py:140-141)
+from datetime import datetime, timedelta
+
+hours_ago = 1  # Download previous hour's file
+target_time = datetime.utcnow() - timedelta(hours=hours_ago)
+filename = target_time.strftime("%Y-%m-%d-%-H.json.gz")
+
+# Example: 2025-01-15-14.json.gz
+```
+
+**Entry Condition:**
+- System time is synchronized (NTP)
+- Target time calculation is correct
+
+**Exit Condition:**
+- `filename` variable contains valid filename string
+
+---
+
+### Step 2: Build Download URL
+
+```python
+url = f"https://data.gharchive.org/{filename}"
+
+# Example: https://data.gharchive.org/2025-01-15-14.json.gz
+```
+
+**Entry Condition:**
+- GitHub Archive domain is reachable
+- Internet connectivity exists
+
+**Failure Mode:**
+- HTTP 404: File not yet available → Should retry
+- HTTP 500/503: Server error → Should retry
+- Network timeout → Should retry
+
+---
+
+### Step 3: Download File
+
+```python
+from urllib.request import urlopen
+
+with urlopen(url, timeout=300) as response:
+    if response.status == 200:
+        compressed_data = response.read()
+        # Expecting ~1.2 MB to 1.2 GB (varies by hour)
+```
+
+**Entry Conditions:**
+| Condition | Value |
+|-----------|-------|
+| `url` | Valid GitHub Archive URL |
+| `timeout` | 300 seconds (5 minutes) |
+| Available memory | Sufficient for file size |
+
+**Exit Conditions:**
+| Condition | Value | Description |
+|-----------|-------|-------------|
+| `response.status` | 200 | HTTP success |
+| `compressed_data` | bytes | File content in memory |
+| `len(compressed_data)` | > 0 | Non-empty file |
+
+**Failure Modes:**
+| Error | Action |
+|-------|--------|
+| `HTTP 404` | Retry after 5 minutes (file not ready) |
+| `HTTP 500/502/503` | Retry with exponential backoff |
+| `Timeout` | Retry with longer timeout |
+| `Memory Error` | Use streaming download (refactor needed) |
+
+---
+
+### Step 4: Validate Gzip Format
+
+```python
+import gzip
+
+try:
+    gzip.decompress(compressed_data)
+except gzip.BadGzipFile:
+    # File is corrupted or not valid gzip
+    raise ValueError("Downloaded file is not valid gzip")
+```
+
+**Entry Conditions:**
+- `compressed_data` contains downloaded bytes
+
+**Exit Conditions:**
+| Condition | Value |
+|-----------|-------|
+| Validation | Pass | File is valid gzip |
+| Validation | Fail | Corrupted download |
+
+**Failure Mode:**
+- BadGzipFile → Log error, skip file (do NOT upload invalid data)
+
+---
+
+### Step 5: Upload to Cloud Storage
+
+```python
+from google.cloud import storage
+
+client = storage.Client(project=PROJECT_ID)
+bucket = client.bucket(BUCKET_NAME)
+blob_name = f"github-archive/raw/{filename}"
+blob = bucket.blob(blob_name)
+
+blob.upload_from_string(
+    compressed_data,
+    content_type="application/gzip"
+)
+```
+
+**Entry Conditions:**
+| Condition | Value | Source |
+|-----------|-------|--------|
+| `compressed_data` | Valid gzip bytes | Step 4 |
+| `BUCKET_NAME` | Existing bucket | Terraform/Manual |
+| `PROJECT_ID` | Valid project | Environment |
+| Service Account | Has `roles/storage.objectCreator` | IAM |
+
+**Exit Conditions:**
+| Condition | Value | Verification |
+|-----------|-------|-------------|
+| Upload Success | `blob.exists() == True` | `blob.upload_from_string()` |
+| File Size | `blob.size == len(compressed_data)` | Integrity check |
+| Content Type | `blob.content_type == "application/gzip"` | Correct MIME type |
+
+**Failure Modes:**
+| Error | Cause | Action |
+|-------|-------|--------|
+| `NotFound` | Bucket doesn't exist | Create bucket first |
+| `PermissionDenied` | SA lacks permissions | Grant `Storage.ObjectCreator` |
+| `Network Error` | Upload interruption | Retry entire upload |
+
+---
+
+## SUCCESS Criteria (Exit Conditions)
+
+Phase 1 is **successful** when ALL of the following are true:
+
+| # | Condition | Verification |
+|---|-----------|--------------|
+| 1 | File downloaded from GitHub Archive | HTTP 200 response |
+| 2 | File is valid gzip format | `gzip.decompress()` succeeds |
+| 3 | File uploaded to correct GCS path | `gs://{bucket}/github-archive/raw/{filename}` exists |
+| 4 | File size matches download | `blob.size == len(compressed_data)` |
+| 5 | Content-Type is set correctly | `blob.content_type == "application/gzip"` |
+| 6 | No errors logged | Log shows "Successfully uploaded {blob_name}" |
+
+---
+
+## FAILURE SCENARIOS & HANDLING
+
+| Scenario | Detection | Action | Retry? |
+|----------|-----------|--------|--------|
+| File not available (404) | HTTP status | Wait 5 min, retry | Yes (up to 6x = 30 min) |
+| Server error (5xx) | HTTP status | Wait 1 min, retry | Yes (up to 3x) |
+| Network timeout | Exception | Wait 2 min, retry | Yes (up to 3x) |
+| Corrupted gzip | `BadGzipFile` | Log error, skip file | No |
+| Insufficient memory | `MemoryError` | Use streaming download | No (requires refactor) |
+| Bucket not found | `NotFound` | Create bucket or fail | No (infra issue) |
+| Permission denied | `PermissionDenied` | Fix IAM and retry | No (infra issue) |
+
+---
+
+## CURRENT CODE LOCATION
+
+**File:** [`src/github_archive/main.py`](../../src/github_archive/main.py)
+**Function:** `download_github_archive()` (lines 127-176)
+
+```python
+@app.route("/tasks/download", methods=["GET", "POST"])
+def download_github_archive():
+    hours_ago = int(request.args.get("hours_ago", 1))
+    target_time = datetime.utcnow() - timedelta(hours=hours_ago)
+    filename = target_time.strftime("%Y-%m-%d-%-H.json.gz")
+    url = f"https://data.gharchive.org/{filename}"
+
+    # Download
+    with urlopen(url, timeout=300) as response:
+        compressed_data = response.read()
+
+    # Validate
+    try:
+        gzip.decompress(compressed_data)
+    except gzip.BadGzipFile:
+        return jsonify({"error": "Invalid gzip data"}), 400
+
+    # Upload
+    blob_name = f"github-archive/raw/{filename}"
+    blob = storage_client.bucket.blob(blob_name)
+    blob.upload_from_string(compressed_data, content_type="application/gzip")
+
+    return jsonify({"message": "File downloaded and uploaded", ...})
 ```
 
 ---
 
-## Exit Conditions Detail
+## IMPROVEMENTS NEEDED
 
-```mermaid
-graph TD
-    subgraph Exit_Criteria [Exit Conditions - All Must Be True]
-        EC1[✅ HTTP 200 from GitHub Archive]
-        EC2[✅ Valid gzip format]
-        EC3[✅ File exists in GCS]
-        EC4[✅ Correct path:<br/>github-archive/raw/{filename}]
-        EC5[✅ File integrity:<br/>blob.size == downloaded_size]
-        EC6[✅ Correct MIME type:<br/>application/gzip]
-        EC7[✅ No errors in logs]
-    end
+### 1. Streaming Download (Memory Issue)
 
-    Exit_Criteria --> Success{Phase 1<br/>Complete}
+**Current Problem:** Downloads entire file (~1.2 GB) into memory.
 
-    Success --> Next[→ Phase 2:<br/>Eventarc Triggering]
+**Solution:**
+```python
+# Stream directly to GCS without loading entire file in memory
+from google.cloud import storage
 
-    style Success fill:#e1f5e1
-    style Next fill:#fff3e0
+bucket = storage.Client().bucket(BUCKET_NAME)
+blob = bucket.blob(f"github-archive/raw/{filename}")
+
+# Stream from URL to GCS
+with urlopen(url) as response:
+    with blob.open("wb") as f:
+        while chunk := response.read(1024 * 1024):  # 1MB chunks
+            f.write(chunk)
+```
+
+### 2. Better Retry Logic
+
+**Current:** No retry for HTTP failures.
+
+**Solution:**
+```python
+from src.shared.retry import retry_with_exponential_backoff
+
+@retry_with_exponential_backoff(
+    max_attempts=6,  # Try for up to 30 minutes
+    wait_min=60,     # Start at 1 minute
+    wait_max=300,    # Max 5 minutes
+    multiplier=2
+)
+def download_from_github_archive(url: str) -> bytes:
+    with urlopen(url, timeout=300) as response:
+        return response.read()
+```
+
+### 3. File Existence Check
+
+**Current:** Assumes file needs to be downloaded every time.
+
+**Solution:**
+```python
+# Check if file already exists in GCS
+blob = bucket.blob(f"github-archive/raw/{filename}")
+if blob.exists():
+    logger.info(f"File {filename} already exists, skipping download")
+    return {"status": "already_exists"}
 ```
 
 ---
 
-## Failure Scenarios
+## MONITORING
 
-```mermaid
-flowchart TD
-    DownloadAttempt[Download Attempt] --> Status{HTTP Status}
+### Metrics to Track
 
-    Status -->|200| ValidFile[Valid File]
-    Status -->|404| FileNotReady[File Not Ready]
-    Status -->|500/503| ServerError[Server Error]
-    Status -->|Timeout| NetworkError[Network Timeout]
-    Status -->|MemoryError| OOM[Out of Memory]
+| Metric | Description | Target |
+|--------|-------------|--------|
+| `download_duration_ms` | Time to download file | < 300 seconds |
+| `file_size_bytes` | Size of downloaded file | ~1.2 GB |
+| `upload_duration_ms` | Time to upload to GCS | < 60 seconds |
+| `download_success` | Download succeeded | 100% |
+| `download_retries` | Number of retries | < 6 |
 
-    FileNotReady --> Wait5[Wait 5 min]
-    ServerError --> Wait1[Wait 1 min]
-    NetworkError --> Wait2[Wait 2 min]
+### Alert Conditions
 
-    ValidFile --> Validate{Validate Gzip}
-    Validate -->|Pass| Upload
-    Validate -->|Fail| Corrupted[Corrupted File - SKIP]
-
-    Wait5 -->|Retry < 6x| DownloadAttempt
-    Wait1 -->|Retry < 3x| DownloadAttempt
-    Wait2 -->|Retry < 3x| DownloadAttempt
-
-    Wait5 -->|Exceeded| Fail404[❌ File Never Appeared]
-    Wait1 -->|Exceeded| FailServer[❌ Server Down]
-    Wait2 -->|Exceeded| FailNetwork[❌ Network Unreachable]
-    OOM --> FailOOM[❌ Memory Error<br/>Refactor to Streaming]
-
-    Upload -->|Success| Success
-    Upload -->|Fail| FailUpload[❌ Upload Failed<br/>Check Permissions]
-
-    style Success fill:#e1f5e1
-    style Corrupted fill:#ffebee
-    style Fail404 fill:#ffebee
-    style FailServer fill:#ffebee
-    style FailNetwork fill:#ffebee
-    style FailOOM fill:#ffebee
-    style FailUpload fill:#ffebee
-```
+| Condition | Severity | Action |
+|-----------|----------|--------|
+| Download fails for > 30 min | Warning | Investigate GitHub Archive status |
+| File size < 100 MB | Warning | Possible partial download |
+| Upload fails | Error | Check GCS bucket & permissions |
 
 ---
 
-## Data Flow (Detailed)
+## TERRAFORM CONFIGURATION
 
-```mermaid
-sequenceDiagram
-    participant S as Cloud Scheduler
-    participant J as Cloud Run Job<br/>(hn-fetcher)
-    participant G as GitHub Archive<br/>(data.gharchive.org)
-    participant M as Memory
-    participant V as Validator
-    participant B as Cloud Storage
+**File:** [`terraform/scheduler.tf`](../../terraform/scheduler.tf)
 
-    Note over S: Every hour at :30 minutes past
-    S->>J: HTTP POST /tasks/download<br/>(scheduled trigger)
+```hcl
+resource "google_cloud_scheduler_job" "github_archive_downloader" {
+  name        = "github-archive-downloader"
+  schedule    = "30 * * * *"  # 30 minutes past each hour
+  time_zone   = "UTC"
 
-    Note over J: Step 1: Calculate Filename
-    J->>J: target_time = now() - 1 hour<br/>filename = "2025-01-15-14.json.gz"
+  http_target {
+    http_method = "POST"
+    uri         = "https://{region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/{project}/jobs/hn-fetcher:run"
 
-    Note over J: Step 2: Build URL
-    J->>J: url = "https://data.gharchive.org/2025-01-15-14.json.gz"
+    body = base64encode(jsonencode({
+      hours_ago = 1,
+      bucket_name = "{project}-data-pipeline"
+    }))
 
-    Note over J, G: Step 3: Download File
-    J->>G: HTTP GET {url}<br/>timeout: 300s
-    G-->>J: HTTP 200 OK<br/>compressed_data (~1.2 GB)
-    J->>M: Store in memory ⚠️
+    oauth_token {
+      service_account_email = google_service_account.scheduler.email
+    }
+  }
 
-    Note over J, V: Step 4: Validate Gzip
-    J->>V: gzip.decompress(compressed_data)
-    V-->>J: Valid ✓
-
-    Note over J, B: Step 5: Upload to GCS
-    J->>B: blob.upload_from_string(compressed_data)<br/>content-type="application/gzip"
-    B->>B: Create object<br/>gs://{bucket}/github-archive/raw/2025-01-15-14.json.gz
-    B-->>J: Upload Success ✓
-
-    J->>S: Return 200 OK<br/>{"filename": "...", "size": ...}
-
-    Note over B: finalize event emitted → Phase 2
-```
-
----
-
-## Component View
-
-```mermaid
-graph TB
-    subgraph Phase1_Components [Phase 1 Components]
-        direction TB
-        Scheduler[Cloud Scheduler<br/>gcloud scheduler jobs<br/>schedule: 30 * * * *]
-
-        Job[Cloud Run Job<br/>hn-fetcher<br/>Container: Python Flask<br/>Memory: 512Mi<br/>CPU: 1]
-
-        Code[Source Code<br/>src/github_archive/main.py<br/>download_github_archive()<br/>Lines: 127-176]
-
-        Storage[Cloud Storage<br/>Bucket: {project}-data-pipeline<br/>Path: github-archive/raw/]
-
-        External[External<br/>GitHub Archive<br/>https://data.gharchive.org/]
-    end
-
-    External -.->|HTTP GET| Job
-    Scheduler -.->|Scheduled Trigger| Job
-    Job -.->|Uploads| Storage
-    Code -.->|Implements| Job
-
-    style Scheduler fill:#e3f2fd
-    style Job fill:#bbdefb
-    style Storage fill:#c8e6c9
-    style External fill:#ffe0b2
-```
-
----
-
-## Improvement Opportunities
-
-```mermaid
-flowchart LR
-    Current[Current: In-Memory Download] --> Issue[❌ Memory Error<br/>for large files]
-
-    Improved[Improved: Streaming Download] --> Fix[✅ Memory Efficient<br/>chunk-by-chunk]
-
-    subgraph Current_Flow [Current Flow]
-        Download[Download 1.2 GB] --> Memory[Load into Memory<br/>RAM usage spikes]
-        Memory --> Upload[Upload to GCS]
-    end
-
-    subgraph Improved_Flow [Improved Flow]
-        Stream[Stream Download] --> Chunks[Process 1MB Chunks<br/>Constant memory]
-        Chunks --> Write[Write Direct to GCS<br/>via blob.open]
-    end
-
-    style Issue fill:#ffebee
-    style Fix fill:#e1f5e1
+  retry_config {
+    retry_count = 2
+    min_backoff = "10s"
+  }
+}
 ```
