@@ -1,16 +1,14 @@
-# Phase 1: Data Flow Sequence Diagram
+# Phase 1: Data Flow Sequence Diagram (gsutil streaming)
 
 ```mermaid
 sequenceDiagram
     participant S as Cloud Scheduler
-    participant J as Cloud Run Job<br>(hn-fetcher)
+    participant J as Cloud Run Job<br>(github-archive-downloader)
     participant G as GitHub Archive<br>(data.gharchive.org)
-    participant M as Memory
-    participant V as Validator
     participant B as Cloud Storage
 
     Note over S: Every hour at :30 minutes past
-    S->>J: HTTP POST /tasks/download<br>(scheduled trigger)
+    S->>J: HTTP POST /run<br>(scheduled trigger)
 
     Note over J: Step 1: Calculate Filename
     J->>J: target_time = now() - 1 hour<br>filename = "2025-01-15-14.json.gz"
@@ -18,21 +16,23 @@ sequenceDiagram
     Note over J: Step 2: Build URL
     J->>J: url = "https://data.gharchive.org/2025-01-15-14.json.gz"
 
-    Note over J, G: Step 3: Download File
-    J->>G: HTTP GET {url}<br>timeout: 300s
-    G-->>J: HTTP 200 OK<br>compressed_data (~1.2 GB)
-    J->>M: Store in memory ⚠️
+    Note over J, B: Step 3: Check if File Exists
+    J->>B: gsutil stat gs://bucket/github-archive/raw/{filename}
+    B-->>J: File Not Found
 
-    Note over J, V: Step 4: Validate Gzip
-    J->>V: gzip.decompress(compressed_data)
-    V-->>J: Valid ✓
+    Note over J, G, B: Step 4: Stream Download (gsutil cp)
+    J->>G: gsutil cp {url} gs://bucket/...
+    Note over J, G, B: Data streams directly (~50MB memory)
+    G-->>B: Streaming data transfer
+    B-->>J: Upload Complete
 
-    Note over J, B: Step 5: Upload to GCS
-    J->>B: blob.upload_from_string(compressed_data)<br>content-type="application/gzip"
-    B->>B: Create object<br>gs://{bucket}/github-archive/raw/2025-01-15-14.json.gz
-    B-->>J: Upload Success ✓
+    Note over J: Step 5: Verify Upload
+    J->>B: gsutil du {gcs_path}
+    B-->>J: File Size: 123456789 bytes
 
-    J->>S: Return 200 OK<br>{"filename": "...", "size": ...}
+    J->>S: Return 200 OK<br>{"filename": "...", "size": ..., "status": "success"}
 
-    Note over B: finalize event emitted → Phase 2
+    Note over B: finalize event emitted → Phase 2 Processing
 ```
+
+**Note:** Using `gsutil cp` for direct streaming from GitHub Archive to GCS. No intermediate validation - Phase 2 handles validation during processing.
