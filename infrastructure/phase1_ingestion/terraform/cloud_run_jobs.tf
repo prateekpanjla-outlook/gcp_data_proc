@@ -13,8 +13,10 @@ resource "google_cloud_run_v2_job" "github_archive_downloader" {
   template {
     template {
       containers {
-        # Uses google-cloud-sdk base image with gsutil pre-installed
-        image = "gcr.io/google.com/cloudsdk:slim"
+        # Custom image built from src/github_archive/phase1_ingestion/Dockerfile
+        # Includes: google-cloud-sdk + coreutils + download.sh script
+        # Build with: gcloud builds submit --config=config/cloudbuild-phase1.yaml .
+        image = "gcr.io/${var.project_id}/github-archive-downloader:latest"
 
         # Environment variables
         env {

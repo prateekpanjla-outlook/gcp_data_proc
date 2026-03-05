@@ -59,7 +59,22 @@ Cloud Storage: gs://{project}-github-archive-landing/github-archive/raw/YYYY-MM-
 
 ### 2. One-Time Setup (Initial Deployment)
 
-**Service Account Creation:**
+**Step 1: Build Container Image with Cloud Build**
+
+The Cloud Run Job requires a custom image that includes:
+- `google-cloud-sdk:slim` (base image with gsutil)
+- `coreutils` (for GNU date command)
+- `scripts/download.sh` (the download script)
+
+```bash
+# Build and push image to Artifact Registry
+gcloud builds submit --config=config/cloudbuild-phase1.yaml .
+
+# Image will be available at:
+# gcr.io/$PROJECT_ID/github-archive-downloader:latest
+```
+
+**Step 2: Service Account Creation**
 
 ```bash
 # Service account ID with environment prefix

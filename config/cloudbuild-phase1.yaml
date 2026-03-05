@@ -1,0 +1,34 @@
+# Cloud Build configuration for Phase 1 GitHub Archive Ingestion
+# Builds a custom image with download.sh script and coreutils
+
+steps:
+  # Build the GitHub Archive downloader image for Cloud Run Job
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-gh-downloader'
+    dir: 'src/github_archive/phase1_ingestion'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/github-archive-downloader:${SHORT_SHA}'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/github-archive-downloader:latest'
+      - '-f'
+      - 'Dockerfile'
+      - '.'
+
+  # Push image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-image'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/github-archive-downloader:${SHORT_SHA}'
+      - 'gcr.io/$PROJECT_ID/github-archive-downloader:latest'
+
+# Cloud Build substitutions
+substitutions:
+  _REGION: us-central1
+
+# Images built by this pipeline
+images:
+  - 'gcr.io/$PROJECT_ID/github-archive-downloader:${SHORT_SHA}'
+  - 'gcr.io/$PROJECT_ID/github-archive-downloader:latest'
