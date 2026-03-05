@@ -17,14 +17,20 @@
 set -e
 
 # =============================================================================
-# Configuration (must be first for SCRIPT_DIR)
+# Change to project root directory (script location independent execution)
 # =============================================================================
+# Get script's directory, then navigate to project root (one level up from infrastructure/)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$(dirname "${SCRIPT_DIR}")")"
+cd "${PROJECT_ROOT}"
+
+echo "Project root: ${PROJECT_ROOT}"
+echo ""
 
 # =============================================================================
 # Logging Setup
 # =============================================================================
-LOG_DIR="${SCRIPT_DIR}/logs"
+LOG_DIR="${PROJECT_ROOT}/infrastructure/scripts/logs"
 TS=$(date +%Y%m%d-%H%M%S)
 LOG_FILE="${LOG_DIR}/phase1-layered-${TS}.log"
 
@@ -64,10 +70,10 @@ fi
 # =============================================================================
 # Terraform Configuration
 # =============================================================================
-TERRAFORM_DIR="${SCRIPT_DIR}/../phase1_ingestion/terraform"
+TERRAFORM_DIR="${PROJECT_ROOT}/infrastructure/phase1_ingestion/terraform"
 SA_ID="${ENVIRONMENT}-terraform-deployer"
 SA_EMAIL="${SA_ID}@${PROJECT_ID}.iam.gserviceaccount.com"
-KEY_FILE="${SCRIPT_DIR}/../secrets/terraform/${SA_ID}-${PROJECT_ID}.json"
+KEY_FILE="${PROJECT_ROOT}/infrastructure/secrets/terraform/${SA_ID}-${PROJECT_ID}.json"
 
 # =============================================================================
 # Layer Definitions
@@ -133,10 +139,9 @@ fi
 echo ""
 
 # =============================================================================
-# Change to Terraform directory
+# Terraform Directory (using -chdir option instead of cd)
 # =============================================================================
-cd "${TERRAFORM_DIR}"
-echo "Working directory: $(pwd)"
+echo "Terraform directory: ${TERRAFORM_DIR}"
 echo ""
 
 # =============================================================================
@@ -151,7 +156,7 @@ echo ""
 # Terraform Initialize
 # =============================================================================
 echo "Step 3: Initializing Terraform..."
-if terraform init > /dev/null 2>&1; then
+if terraform -chdir="${TERRAFORM_DIR}" init > /dev/null 2>&1; then
   echo "  ✓ Terraform initialized"
 else
   echo "  ✗ Terraform init failed"
@@ -178,12 +183,18 @@ deploy_layer() {
   echo "Creating plan for Layer ${layer_num}..."
   plan_file="${LOG_DIR}/phase1-layer${layer_num}-${TS}.tfplan"
 
-  if terraform plan \
+  # Build target flags for each resource
+  target_flags=""
+  for target in $targets; do
+    target_flags="$target_flags -target=$target"
+  done
+
+  if terraform -chdir="${TERRAFORM_DIR}" plan \
     -out="${plan_file}" \
     -var="project_id=${PROJECT_ID}" \
     -var="environment=${ENVIRONMENT}" \
     -var="region=${REGION}" \
-    -target=$targets 2>/dev/null; then
+    $target_flags 2>/dev/null; then
     echo "  ✓ Plan created: ${plan_file}"
   else
     echo "  ✗ Plan failed for Layer ${layer_num}"
@@ -193,7 +204,7 @@ deploy_layer() {
 
   # Show what will be created
   echo "Planned changes for Layer ${layer_num}:"
-  terraform show "${plan_file}" 2>/dev/null | grep -A3 "Plan:" || true
+  terraform -chdir="${TERRAFORM_DIR}" show "${plan_file}" 2>/dev/null | grep -A3 "Plan:" || true
   echo ""
 
   # Prompt for confirmation
@@ -209,7 +220,7 @@ deploy_layer() {
 
   # Apply this layer
   echo "Applying Layer ${layer_num}..."
-  if terraform apply "${plan_file}"; then
+  if terraform -chdir="${TERRAFORM_DIR}" apply "${plan_file}"; then
     echo ""
     echo "  ✅ Layer ${layer_num} (${layer_name}) deployed successfully!"
   else

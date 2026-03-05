@@ -9,22 +9,18 @@ steps:
     args:
       - 'build'
       - '-t'
-      - 'gcr.io/$PROJECT_ID/github-archive-downloader:${SHORT_SHA}'
-      - '-t'
       - 'gcr.io/$PROJECT_ID/github-archive-downloader:latest'
       - '-f'
       - 'Dockerfile'
       - '.'
 
-  # Push image to Artifact Registry
+  # Push image to Artifact Registry (build step pushes automatically)
   - name: 'gcr.io/cloud-builders/docker'
     id: 'push-image'
     args:
       - 'push'
-      - 'gcr.io/$PROJECT_ID/github-archive-downloader:${SHORT_SHA}'
       - 'gcr.io/$PROJECT_ID/github-archive-downloader:latest'
 
 # Images built by this pipeline
 images:
-  - 'gcr.io/$PROJECT_ID/github-archive-downloader:${SHORT_SHA}'
   - 'gcr.io/$PROJECT_ID/github-archive-downloader:latest'
