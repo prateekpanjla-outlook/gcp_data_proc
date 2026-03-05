@@ -6,7 +6,7 @@ flowchart TB
 
     Job[Cloud Run Job<br>dev-github-archive-download-gsutil<br>Container: gcloud-sdk:slim<br>Memory: 512Mi<br>CPU: 1]
 
-    Code[Source Code<br>src/phase1_ingestion/scripts/download.sh<br>gsutil cp for streaming<br>Lines: ~50]
+    Code[Source Code<br>src/phase1_ingestion/scripts/download.sh<br>curl | gsutil cp - for streaming<br>Lines: ~200]
 
     Storage["Cloud Storage<br>Bucket: {project}-dev-github-archive-landing<br>Path: github-archive/raw/"]
 

@@ -10,6 +10,6 @@ flowchart LR
     style Implemented fill:#e1f5e1
 ```
 
-**Status:** ✅ **Already implemented** - Using `gsutil cp` for streaming downloads. No memory issues even with 1.2GB files.
+**Status:** ✅ **Already implemented** - Using `curl | gsutil cp -` for streaming downloads. No memory issues even with 1.2GB files.
 
 **Trade-off:** No gzip validation in Phase 1 (happens in Phase 2 processing).

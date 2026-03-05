@@ -31,19 +31,20 @@ resource "google_cloud_run_v2_job" "github_archive_downloader" {
         }
 
         # Resource limits (minimal - gsutil streams data)
+        # Cloud Run v2 requires min 512Mi when CPU is allocated
         resources {
           limits = {
             cpu    = "1"
-            memory = "256Mi"  # Low memory due to streaming
+            memory = "512Mi"  # v2 minimum with CPU
           }
         }
       }
 
       # Timeout for download operation
-      timeout = "600s"  # 10 minutes (enough for 1-2 GB file)
+      timeout = "1800s"  # 30 minutes (enough for 1-2 GB file)
 
       # Service account (needs Storage.ObjectCreator)
-      service_account_name = google_service_account.hn_fetcher.email
+      service_account = google_service_account.hn_fetcher.email
       region                = var.region
     }
   }
@@ -105,7 +106,7 @@ resource "google_cloud_scheduler_job" "github_archive_downloader" {
   # Retry configuration
   retry_config {
     retry_count = 1
-    min_backoff = "60s"
+    min_backoff_duration = "60s"
   }
 }
 
@@ -113,7 +114,7 @@ resource "google_cloud_scheduler_job" "github_archive_downloader" {
 resource "google_cloud_run_v2_job_iam_member" "scheduler_invoker" {
   project  = var.project_id
   location = var.region
-  job_name = google_cloud_run_v2_job.github_archive_downloader.name
+  name     = google_cloud_run_v2_job.github_archive_downloader.name
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.scheduler.email}"
 }

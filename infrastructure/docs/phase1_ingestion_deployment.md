@@ -93,7 +93,7 @@ gcloud builds submit \
 **Container Details:**
 - Base image: `gcr.io/google.com/cloud-sdk:slim`
 - Script: `src/github_archive/scripts/download.sh`
-- Uses `gsutil` for streaming downloads (memory-efficient)
+- Uses `curl | gsutil cp -` for streaming downloads (memory-efficient)
 
 ---
 
@@ -214,8 +214,8 @@ gcloud run jobs execute dev-github-archive-download-gsutil \
 │                                                                             │
 │   1. Cloud Scheduler Job (dev-github-archive-download-job)                  │
 │      ├─ Schedule: "30 * * * *" (every hour at 30 min past)                 │
-│      ├─ Uses: OIDC token with dev-scheduler SA email                       │
-│      └─ Target: Cloud Run Job (:run endpoint)                               │
+│      ├─ Uses: OAuth token with dev-scheduler SA email                      │
+│      └─ Target: Cloud Run Job API (:run endpoint)                           │
 │                             ↓                                               │
 │   2. Scheduler Service Account (dev-scheduler)                              │
 │      ├─ Requires: roles/run.invoker ON the Cloud Run Job                   │

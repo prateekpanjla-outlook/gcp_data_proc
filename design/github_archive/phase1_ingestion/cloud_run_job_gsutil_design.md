@@ -17,8 +17,8 @@ Use a Cloud Run Job with the Google Cloud SDK base image to download GitHub Arch
 │   │                                                                  │   │
 │   │   Base Image: gcr.io/google.com/cloud-sdk:latest                 │   │
 │   │   Entry: /scripts/download.sh                                    │   │
-│   │   Memory: 256Mi (minimal - gsutil streams)                     │   │
-│   │   Timeout: 600s (10 min)                                         │   │
+│   │   Memory: 512Mi (Cloud Run v2 minimum with CPU)                 │   │
+│   │   Timeout: 1800s (30 min)                                        │   │
 │   │                                                                  │   │
 │   │   ┌───────────────────────────────────────────────────────────┐   │   │
 │   │   │ 1. Calculate target filename (YYYY-MM-DD-H.json.gz)     │   │   │
@@ -31,8 +31,8 @@ Use a Cloud Run Job with the Google Cloud SDK base image to download GitHub Arch
 │   │                                  │                               │   │
 │   │   ▼                                  │                               │   │
 │   │   ┌───────────────────────────────────────────────────────────┐   │   │
-│   │   │ 3. gsutil cp https://data.gharchive.org/{filename}       │   │   │
-│   │   │         gs://{bucket}/github-archive/raw/{filename}       │   │   │
+│   │   │ 3. curl https://data.gharchive.org/{filename} |          │   │   │
+│   │   │         gsutil cp - gs://{bucket}/github-archive/raw/    │   │   │
 │   │   └───────────────────────────────────────────────────────────┘   │   │
 │   │                                  │                               │   │
 │   │   ▼                                  │                               │   │
@@ -110,8 +110,9 @@ if gsutil -q stat "${GCS_PATH}" 2>/dev/null; then
     exit 0
 fi
 
-# Download using gsutil (streams automatically)
-gsutil cp "${SOURCE_URL}" "${GCS_PATH}"
+# Download using curl + pipe to gsutil (streams automatically)
+# Note: gsutil cp does NOT support HTTP URLs, must use curl for HTTP
+curl -fsSL "${SOURCE_URL}" | gsutil cp - "${GCS_PATH}"
 
 # Verify upload
 FILE_SIZE=$(gsutil du "${GCS_PATH}" | awk '{print $1}')
@@ -189,19 +190,20 @@ resource "google_cloud_run_v2_job" "github_archive_downloader" {
         }
 
         # Resource limits (minimal - gsutil streams)
+        # Cloud Run v2 requires min 512Mi when CPU is allocated
         resources {
           limits = {
             cpu    = "1"
-            memory = "256Mi"  # Low memory due to streaming
+            memory = "512Mi"  # v2 minimum with CPU
           }
         }
       }
 
       # Timeout for download
-      timeout = "600s"  # 10 minutes
+      timeout = "1800s"  # 30 minutes
 
       # Service account
-      service_account_name = google_service_account.hn_fetcher.email
+      service_account = google_service_account.hn_fetcher.email
       region                = var.region
     }
   }
@@ -229,7 +231,7 @@ resource "google_cloud_scheduler_job" "github_archive_downloader" {
 
   retry_config {
     retry_count = 1
-    min_backoff = "60s"
+    min_backoff_duration = "60s"
   }
 }
 ```
@@ -289,9 +291,10 @@ if gsutil -q stat "${GCS_PATH}" 2>/dev/null; then
     exit 0
 fi
 
-# Download using gsutil (streams automatically)
+# Download using curl + pipe to gsutil (streams automatically)
+# Note: gsutil cp does NOT support HTTP URLs, must use curl for HTTP
 echo "Starting download..."
-gsutil cp "${SOURCE_URL}" "${GCS_PATH}"
+curl -fsSL "${SOURCE_URL}" | gsutil cp - "${GCS_PATH}"
 
 # Verify upload
 FILE_SIZE=$(gsutil du "${GCS_PATH}" | awk '{print $1}')
@@ -334,9 +337,9 @@ gcloud builds submit --tag gcr.io/$PROJECT_ID/github-archive-downloader .
 gcloud run jobs create github-archive-downloader \
     --image gcr.io/$PROJECT_ID/github-archive-downloader \
     --region $REGION \
-    --memory 256Mi \
+    --memory 512Mi \
     --cpu 1 \
-    --timeout 10m \
+    --timeout 30m \
     --set-env-vars BUCKET_NAME=$PROJECT_ID-data-pipeline,PROJECT_ID=$PROJECT_ID \
     --service-account=sa-hn-fetcher@$PROJECT_ID.iam.gserviceaccount.com
 ```

@@ -20,8 +20,8 @@ sequenceDiagram
     J->>B: gsutil stat gs://bucket/github-archive/raw/{filename}
     B-->>J: File Not Found
 
-    Note over J, G, B: Step 4: Stream Download (gsutil cp)
-    J->>G: gsutil cp {url} gs://bucket/...
+    Note over J, G, B: Step 4: Stream Download (curl | gsutil cp -)
+    J->>G: curl {url} | gsutil cp - gs://bucket/...
     Note over J, G, B: Data streams directly (~50MB memory)
     G-->>B: Streaming data transfer
     B-->>J: Upload Complete
@@ -35,4 +35,4 @@ sequenceDiagram
     Note over B: finalize event emitted → Phase 2 Processing
 ```
 
-**Note:** Using `gsutil cp` for direct streaming from GitHub Archive to GCS. No intermediate validation - Phase 2 handles validation during processing.
+**Note:** Using `curl | gsutil cp -` for direct streaming from GitHub Archive to GCS. gsutil does not support HTTP URLs directly. No intermediate validation - Phase 2 handles validation during processing.

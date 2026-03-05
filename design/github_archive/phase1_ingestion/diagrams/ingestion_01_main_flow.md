@@ -18,7 +18,7 @@ graph TD
 
     BuildURL --> CheckExists["Step 3:<br>Check if File Exists in GCS"]
     CheckExists -->|Already Exists| Skip[Skip Download<br>Idempotent]
-    CheckExists -->|Not Found| StreamDownload["Step 4:<br>gsutil cp Streaming<br>GitHub Archive → GCS"]
+    CheckExists -->|Not Found| StreamDownload["Step 4:<br>curl + gsutil cp Streaming<br>GitHub Archive → GCS"]
 
     StreamDownload --> Verify{Upload Successful?}
     Verify -->|Yes| Success([✅ Phase 1 Success])
@@ -35,4 +35,4 @@ graph TD
     style Trigger fill:#fff3e0
 ```
 
-**Note:** Using `gsutil cp` for streaming download (memory efficient ~50MB). Validation happens in Phase 2 (processing). Corrupted files from GitHub Archive will be detected during processing.
+**Note:** Using `curl | gsutil cp -` for streaming download (memory efficient ~50MB). Validation happens in Phase 2 (processing). Corrupted files from GitHub Archive will be detected during processing.

@@ -31,7 +31,7 @@ GitHub Archive (https://data.gharchive.org/)
         │ Cloud Scheduler (cron: 30 * * * *)
         ▼
 Cloud Run Job: dev-github-archive-download-gsutil
-        │ gsutil cp (streams data)
+        │ curl | gsutil cp - (streams data)
         ▼
 Cloud Storage: gs://{project}-github-archive-landing/github-archive/raw/YYYY-MM-DD-HH.json.gz
 ```
@@ -124,8 +124,8 @@ The `${ENVIRONMENT}-scheduler` service account requires specific permissions to 
 │                                                                             │
 │   1. Cloud Scheduler Job (${ENVIRONMENT}-github-archive-download-job)       │
 │      ├─ Schedule: "30 * * * *" (every hour at 30 min past)                 │
-│      ├─ Uses: OIDC token with ${ENVIRONMENT}-scheduler SA email            │
-│      └─ Target: Cloud Run Job (:run endpoint)                               │
+│      ├─ Uses: OAuth token with ${ENVIRONMENT}-scheduler SA email           │
+│      └─ Target: Cloud Run Job API (:run endpoint)                           │
 │                             ↓                                               │
 │   2. Scheduler Service Account (${ENVIRONMENT}-scheduler)                   │
 │      ├─ Requires: roles/run.invoker ON the Cloud Run Job                   │
@@ -142,16 +142,23 @@ The `${ENVIRONMENT}-scheduler` service account requires specific permissions to 
 **Terraform Configuration (scheduler.tf):**
 
 ```hcl
-# Scheduler Job with OIDC authentication
+# Scheduler Job with OAuth authentication (required for *.googleapis.com endpoints)
 resource "google_cloud_scheduler_job" "github_archive_download" {
   name        = "${local.env_prefix}-github-archive-download-job"
   schedule    = "30 * * * *"
   http_target {
     http_method = "POST"
     uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${var.project_id}/jobs/${local.env_prefix}-github-archive-download-gsutil:run"
-    oidc_token {
+    # Use OAuth (not OIDC) for Cloud Run Jobs API
+    # The Jobs API endpoint (*.googleapis.com) requires OAuth tokens
+    oauth_token {
       service_account_email = google_service_account.scheduler.email
     }
+  }
+
+  retry_config {
+    retry_count = 2
+    min_backoff_duration = "10s"
   }
 }
 
@@ -159,7 +166,7 @@ resource "google_cloud_scheduler_job" "github_archive_download" {
 resource "google_cloud_run_v2_job_iam_member" "scheduler_github_download_invoker" {
   project  = var.project_id
   location = var.region
-  job_name = google_cloud_run_v2_job.github_archive_downloader.name
+  name     = google_cloud_run_v2_job.github_archive_downloader.name
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.scheduler.email}"
 }
@@ -320,12 +327,13 @@ except gzip.BadGzipFile:
 ```bash
 # From src/github_archive/scripts/download.sh
 # gsutil streams data directly - memory efficient (~50MB constant usage)
+# Note: gsutil cp does NOT support HTTP URLs, must use curl for HTTP download
 
 SOURCE_URL="https://data.gharchive.org/${FILENAME}"
 GCS_PATH="gs://${BUCKET_NAME}/github-archive/raw/${FILENAME}"
 
-# Upload with streaming
-gsutil cp "${SOURCE_URL}" "${GCS_PATH}"
+# Upload with streaming (curl for HTTP, pipe to gsutil for GCS)
+curl -fsSL "${SOURCE_URL}" | gsutil cp - "${GCS_PATH}"
 ```
 
 **Alternative: Python Client Library (Original)**
@@ -447,7 +455,8 @@ if gsutil -q stat "${GCS_PATH}" 2>/dev/null; then
 fi
 
 # Download and upload in one streaming operation (memory efficient)
-gsutil cp "${SOURCE_URL}" "${GCS_PATH}"
+# Note: gsutil cp does NOT support HTTP URLs, must use curl for HTTP
+curl -fsSL "${SOURCE_URL}" | gsutil cp - "${GCS_PATH}"
 
 # Verify upload
 SIZE=$(gsutil du "${GCS_PATH}" | awk '{print $1}')
@@ -685,19 +694,20 @@ resource "google_cloud_run_v2_job" "github_archive_downloader" {
         }
 
         # Resource limits
+        # Cloud Run v2 requires min 512Mi when CPU is allocated
         resources {
           limits = {
             cpu    = "1"
-            memory = "256Mi"
+            memory = "512Mi"
           }
         }
       }
 
       # Service account
-      service_account_name = google_service_account.github_archive_downloader.email
+      service_account = google_service_account.github_archive_downloader.email
 
-      # Timeout
-      timeout_seconds = 1800  # 30 minutes
+      # Timeout (30 minutes)
+      timeout = "1800s"
     }
   }
 }
@@ -719,14 +729,15 @@ resource "google_cloud_scheduler_job" "github_archive_download" {
     http_method = "POST"
     uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${var.project_id}/jobs/${local.github_archive.job_name}:run"
 
-    oidc_token {
+    # Use OAuth (not OIDC) for Cloud Run Jobs API
+    oauth_token {
       service_account_email = google_service_account.scheduler.email
     }
   }
 
   retry_config {
     retry_count = 2
-    min_backoff = "10s"
+    min_backoff_duration = "10s"
   }
 }
 
@@ -734,7 +745,7 @@ resource "google_cloud_scheduler_job" "github_archive_download" {
 resource "google_cloud_run_v2_job_iam_member" "scheduler_github_download_invoker" {
   project  = var.project_id
   location = var.region
-  job_name = google_cloud_run_v2_job.github_archive_downloader.name
+  name     = google_cloud_run_v2_job.github_archive_downloader.name
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.scheduler.email}"
 }
