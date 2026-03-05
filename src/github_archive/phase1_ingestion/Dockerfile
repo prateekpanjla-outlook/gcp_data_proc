@@ -1,9 +1,7 @@
 # Cloud Run Job: GitHub Archive Downloader
 # Uses google-cloud-sdk base image with gsutil for streaming downloads
 
-# Using mirror.gcr.io for environments without gcr.io access
-# In production with gcr.io access, use: FROM gcr.io/google.com/cloud-sdk:slim
-FROM mirror.gcr.io/google/cloud-sdk:slim
+FROM gcr.io/google.com/cloud-sdk:slim
 
 # Install additional utilities if needed
 # Coreutils includes date with -d option for time calculations
