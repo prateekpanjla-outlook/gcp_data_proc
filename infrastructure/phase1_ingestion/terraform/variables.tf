@@ -1,0 +1,35 @@
+# Variables for Phase 1: GitHub Archive Ingestion
+
+variable "project_id" {
+  description = "Google Cloud Project ID"
+  type        = string
+}
+
+variable "region" {
+  description = "Google Cloud Region"
+  type        = string
+  default     = "us-central1"
+}
+
+variable "environment" {
+  description = "Environment name (dev, staging, prod)"
+  type        = string
+  default     = "dev"
+
+  validation {
+    condition     = contains(["dev", "staging", "prod"], var.environment)
+    error_message = "Environment must be either 'dev', 'staging', or 'prod'."
+  }
+}
+
+variable "force_destroy" {
+  description = "Force destroy buckets even if they contain objects (dev only)"
+  type        = bool
+  default     = false
+}
+
+variable "bucket_lifecycle_days" {
+  description = "Number of days before landing bucket files are deleted"
+  type        = number
+  default     = 90
+}
