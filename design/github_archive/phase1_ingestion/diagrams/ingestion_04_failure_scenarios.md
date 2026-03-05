@@ -25,10 +25,10 @@ flowchart TD
     Wait5 -->|Exceeded| Fail404[❌ File Never Appeared]
     Wait1 -->|Exceeded| FailServer[❌ Server Down]
     Wait2 -->|Exceeded| FailNetwork[❌ Network Unreachable]
-    OOM --> FailOOM[❌ Memory Error<br/>Refactor to Streaming]
+    OOM --> FailOOM[❌ Memory Error<br>Refactor to Streaming]
 
     Upload -->|Success| Success
-    Upload -->|Fail| FailUpload[❌ Upload Failed<br/>Check Permissions]
+    Upload -->|Fail| FailUpload[❌ Upload Failed<br>Check Permissions]
 
     style Success fill:#e1f5e1
     style Corrupted fill:#ffebee

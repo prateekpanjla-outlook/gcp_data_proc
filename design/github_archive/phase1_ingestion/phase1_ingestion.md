@@ -18,8 +18,8 @@ Phase 1 is responsible for downloading the hourly GitHub Archive file and landin
 - [Terraform Configuration](terraform_gsutil_config.md) - Infrastructure as Code
 
 **Implementation:**
-- [`src/github_archive/Dockerfile.job`](../../src/github_archive/Dockerfile.job) - Container definition
-- [`src/github_archive/scripts/download.sh`](../../src/github_archive/scripts/download.sh) - Download script
+- [`src/phase1_ingestion/Dockerfile.job`](../../src/phase1_ingestion/Dockerfile.job) - Container definition
+- [`src/phase1_ingestion/scripts/download.sh`](../../src/phase1_ingestion/scripts/download.sh) - Download script
 
 ---
 
