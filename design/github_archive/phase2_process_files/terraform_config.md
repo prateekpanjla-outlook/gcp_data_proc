@@ -24,7 +24,7 @@ resource "google_project_service" "phase2_apis" {
 ## Terraform Files Structure
 
 ```
-infrastructure/phase_process_files/terraform/
+infrastructure/phase2_process_files/terraform/
 ├── main.tf              # Provider and main resources
 ├── variables.tf         # Input variables
 ├── outputs.tf           # Output values

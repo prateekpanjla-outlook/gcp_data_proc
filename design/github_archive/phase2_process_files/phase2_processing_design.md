@@ -170,7 +170,7 @@ Phase 2 processes GitHub Archive files landed in GCS by Phase 1, validates, tran
 ### Schema Location
 
 ```
-src/github_archive/phase_process_files/
+src/github_archive/phase2_process_files/
 ├── schemas/
 │   ├── __init__.py
 │   ├── github_event_schema.py     # Pydantic models for GitHub events
@@ -459,10 +459,10 @@ gs://{project}-{env}-github-archive-dlq/        # Dead Letter Queue
 ## File Structure
 
 ```
-phase_process_files/
+phase2_process_files/
 ├── design/
 │   └── github_archive/
-│       └── phase_process_files/
+│       └── phase2_process_files/
 │           ├── phase2_processing_design.md          # This file
 │           ├── diagrams/
 │           │   ├── 01_main_flow.md
@@ -474,7 +474,7 @@ phase_process_files/
 │
 ├── src/
 │   └── github_archive/
-│       └── phase_process_files/
+│       └── phase2_process_files/
 │           ├── main.py                             # Cloud Run Service entry
 │           ├── schemas/
 │           │   ├── __init__.py
@@ -506,7 +506,7 @@ phase_process_files/
 │
 ├── test/
 │   └── github_archive/
-│       └── phase_process_files/
+│       └── phase2_process_files/
 │           ├── __init__.py
 │           ├── test_schemas.py
 │           ├── test_processors.py
@@ -517,7 +517,7 @@ phase_process_files/
 │               └── sample_file.json.gz
 │
 └── infrastructure/
-    └── phase_process_files/
+    └── phase2_process_files/
         ├── terraform/
         │   ├── main.tf
         │   ├── variables.tf
