@@ -1,7 +1,7 @@
 # Phase 2: Component View
 
 ```mermaid
-flowchart TB
+graph TB
     subgraph Input["INPUT - Phase 1 Landing Zone"]
         CS[Cloud Storage<br>gs://...-landing/raw/]
     end

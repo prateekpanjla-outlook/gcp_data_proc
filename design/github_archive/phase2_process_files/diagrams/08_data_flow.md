@@ -1,11 +1,11 @@
 # Phase 2: Data Flow Transformation
 
 ```mermaid
-flowchart LR
+graph LR
     subgraph Input["INPUT FORMAT"]
         IN1[GitHub Archive<br>.json.gz]
         IN2[One JSON object per line<br>~142,000 lines]
-        IN3[Nested JSON structure<br>actor: {id, login,...}<br>repo: {id, name,...}<br>payload: {...}]
+        IN3["Nested JSON structure<br>actor: {id, login,...}<br>repo: {id, name,...}<br>payload: {...}"]
     end
 
     subgraph Process["PROCESSING"]

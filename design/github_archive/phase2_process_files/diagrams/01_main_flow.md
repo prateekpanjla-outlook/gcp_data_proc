@@ -2,7 +2,7 @@
 
 ```mermaid
 graph TD
-    Start([Phase 2 Start]) --> Input[Input File<br>gs://landing/raw/{YYYY-MM-DD-HH}.json.gz]
+    Start([Phase 2 Start]) --> Input["Input File<br>gs://landing/raw/{YYYY-MM-DD-HH}.json.gz"]
 
     Input --> EventArc[Eventarc Trigger<br>finalize event on raw/]
 
@@ -13,7 +13,7 @@ graph TD
     SizeCheck -->|< 500MB| Direct[Direct Processing<br>process_file]
     SizeCheck -->|>= 500MB| Split[File Splitting<br>file_splitter Job]
 
-    Split --> Chunks[Create Chunks<br>raw/chunks/{file}-chunk-{N}.json.gz]
+    Split --> Chunks["Create Chunks<br>raw/chunks/{file}-chunk-{N}.json.gz"]
     Chunks --> ChunkEvents[Pub/Sub Events<br>for each chunk]
     ChunkEvents --> ChunkProcess[process_chunk<br>for each event]
 
@@ -25,7 +25,7 @@ graph TD
     Valid -->|No| DLQ[Dead Letter Queue<br>gs://dlq/events/]
 
     Transform --> Output[Output: NDJSON<br>Compressed with gzip]
-    Output --> Stage[Stage File<br>gs://staging/processed/{file}.ndjson.gz]
+    Output --> Stage["Stage File<br>gs://staging/processed/{file}.ndjson.gz"]
 
     Stage --> Complete[Mark Complete<br>Firestore tracking]
     Complete --> Success([✅ Phase 2 Complete])

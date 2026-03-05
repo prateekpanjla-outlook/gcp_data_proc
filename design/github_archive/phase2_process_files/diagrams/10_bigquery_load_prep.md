@@ -1,8 +1,8 @@
 # Phase 2: BigQuery Load Preparation
 
 ```mermaid
-flowchart TD
-    Proc([Processing Complete]) --> Out[Output File<br>gs://...-staging/processed/{file}.ndjson.gz]
+graph TD
+    Proc([Processing Complete]) --> Out["Output File<br>gs://...-staging/processed/{file}.ndjson.gz"]
 
     Out --> Track[Firestore Tracking]
     Track --> AllChunks{All chunks done?}

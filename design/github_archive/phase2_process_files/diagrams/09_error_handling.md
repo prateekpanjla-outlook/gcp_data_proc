@@ -1,7 +1,7 @@
 # Phase 2: Error Handling Flow
 
 ```mermaid
-flowchart TD
+graph TD
     Start([Processing Event]) --> Check{Error Type?}
 
     Check -->|File corrupted| FileErr[File-Level Error]
@@ -62,7 +62,7 @@ flowchart TD
 **DLQ Processor:**
 
 ```mermaid
-flowchart LR
+graph LR
     DLQ[DLQ Topic] --> Processor[DLQ Processor<br>Cloud Run Job]
     Processor --> Analyze[Analyze error]
 

@@ -1,17 +1,17 @@
 # Phase 2: File Splitting for Large Files
 
 ```mermaid
-flowchart TD
-    Start([Large File Detected<br>>= 500MB]) --> Download[Download to /tmp<br>fast local SSD]
+graph TD
+    Start(["Large File Detected<br>>= 500MB"]) --> Download[Download to /tmp<br>fast local SSD]
 
     Download --> Stream[Stream Read<br>Line by line]
 
     Stream --> Count{Line Count<br>> Chunk Size?}
 
     Count -->|No| Accumulate[Accumulate lines<br>in memory]
-    Count -->|Yes| WriteChunk[Write chunk to temp<br>/tmp/chunk-{N}.json]
+    Count -->|Yes| WriteChunk["Write chunk to temp<br>/tmp/chunk-{N}.json"]
 
-    WriteChunk --> Upload[Upload chunk to GCS<br>gs://.../chunks/{file}-chunk-{N}.json.gz]
+    WriteChunk --> Upload["Upload chunk to GCS<br>gs://.../chunks/{file}-chunk-{N}.json.gz"]
 
     Upload --> Emit[Emit Pub/Sub event<br>for this chunk]
 

@@ -1,7 +1,7 @@
 # Phase 2: Autoscaling Configuration
 
 ```mermaid
-flowchart LR
+graph LR
     Incoming[Incoming Files<br>Eventarc Events] --> CR[Cloud Run Service<br>github-archive-processor]
 
     CR --> Scale0[Scale: 0<br>Idle state]

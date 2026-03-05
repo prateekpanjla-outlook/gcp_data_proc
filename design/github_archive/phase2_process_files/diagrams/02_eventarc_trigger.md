@@ -7,7 +7,7 @@ sequenceDiagram
     participant P as Pub/Sub
     participant CR as Cloud Run Service<br>github-archive-processor
 
-    Note over S: File lands in gs://.../raw/{file}.json.gz
+    Note over S: File lands in gs://.../raw/{filename}.json.gz
     S->>E: finalize event emitted
 
     Note over E: Eventarc Filter:<br>prefix="github-archive/raw/"<br>suffix=".json.gz"

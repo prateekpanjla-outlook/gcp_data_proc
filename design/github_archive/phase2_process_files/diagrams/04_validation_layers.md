@@ -1,7 +1,7 @@
 # Phase 2: Validation Layers
 
 ```mermaid
-flowchart TB
+graph TB
     Input([Input File]) --> L1{Layer 1:<br>File Validation}
 
     L1 -->|Pass| L2{Layer 2:<br>Line Validation}
