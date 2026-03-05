@@ -81,7 +81,7 @@ gcloud iam service-accounts keys create github-archive-downloader-key.json \
 
 # Build
 cd src/github_archive/
-docker build -f Dockerfile.job -t github-archive-downloader:latest .
+docker build -f Dockerfile -t github-archive-downloader:latest .
 
 # Run with key file
 docker run --rm \

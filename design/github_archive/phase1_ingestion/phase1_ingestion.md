@@ -18,7 +18,7 @@ Phase 1 is responsible for downloading the hourly GitHub Archive file and landin
 - [Terraform Configuration](terraform_gsutil_config.md) - Infrastructure as Code
 
 **Implementation:**
-- [`src/phase1_ingestion/Dockerfile.job`](../../src/phase1_ingestion/Dockerfile.job) - Container definition
+- [`src/phase1_ingestion/Dockerfile`](../../src/phase1_ingestion/Dockerfile) - Container definition
 - [`src/phase1_ingestion/scripts/download.sh`](../../src/phase1_ingestion/scripts/download.sh) - Download script
 
 ---
@@ -55,7 +55,7 @@ Cloud Storage: gs://{project}-github-archive-landing/github-archive/raw/YYYY-MM-
 | `HOURS_AGO` | Env Var | Hours to look back for file (default: 1) |
 | Cloud Run Job | Resource | `${ENVIRONMENT}-github-archive-download-gsutil` |
 | Cloud Scheduler | Resource | `${ENVIRONMENT}-github-archive-download-job` |
-| Container Image | Artifact | Built from [`src/github_archive/Dockerfile.job`](../../src/github_archive/Dockerfile.job) |
+| Container Image | Artifact | Built from [`src/github_archive/Dockerfile`](../../src/github_archive/Dockerfile) |
 
 ### 2. One-Time Setup (Initial Deployment)
 
@@ -387,10 +387,10 @@ Phase 1 is **successful** when ALL of the following are true:
 ### gsutil-based Implementation (Recommended)
 
 **Files:**
-- [`src/github_archive/Dockerfile.job`](../../src/github_archive/Dockerfile.job) - Container definition
+- [`src/github_archive/Dockerfile`](../../src/github_archive/Dockerfile) - Container definition
 - [`src/github_archive/scripts/download.sh`](../../src/github_archive/scripts/download.sh) - Download script
 
-**Dockerfile.job:**
+**Dockerfile:**
 ```dockerfile
 FROM gcr.io/google.com/cloud-sdk:slim
 

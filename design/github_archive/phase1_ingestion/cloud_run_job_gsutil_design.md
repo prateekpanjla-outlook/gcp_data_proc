@@ -153,7 +153,7 @@ echo "Size: ${FILE_SIZE} bytes"
 ```
 cloud_storage_run_bigquery_data_project/
 ├── src/github_archive/
-│   ├── Dockerfile.job          # Cloud Run Job Dockerfile
+│   ├── Dockerfile          # Cloud Run Job Dockerfile
 │   ├── scripts/
 │   │   └── download.sh         # Download script
 │   └── main.py                 # (Flask app - kept for manual use)
@@ -302,7 +302,7 @@ echo "Size: ${FILE_SIZE} bytes"
 
 ### Step 2: Create Dockerfile
 
-**File:** `src/github_archive/Dockerfile.job`
+**File:** `src/github_archive/Dockerfile`
 
 ```dockerfile
 FROM gcr.io/google.com/cloud-sdk:slim

@@ -48,7 +48,7 @@ cd src/github_archive/
 ### Step 2: Build Docker Image
 
 ```bash
-docker build -f Dockerfile.job -t github-archive-downloader:latest .
+docker build -f Dockerfile -t github-archive-downloader:latest .
 ```
 
 **Output:**

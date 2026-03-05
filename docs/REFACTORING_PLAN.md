@@ -334,7 +334,7 @@ cloud_storage_run_bigquery_data_project/
 │   │   ├── main.py          # Cloud Run Job entrypoint
 │   │   ├── processor.py     # Processing logic
 │   │   ├── schemas.py
-│   │   └── Dockerfile.job   # Job-specific Dockerfile
+│   │   └── Dockerfile   # Job-specific Dockerfile
 │   ├── hacker_news/
 │   │   ├── fetcher.py       # Cloud Run Job
 │   │   ├── processor.py     # Cloud Run Job
