@@ -755,3 +755,45 @@ resource "google_storage_bucket" "github_archive_landing" {
   }
 }
 ```
+
+---
+
+## LEARNINGS & GOTCHAS
+
+### Timezone and Time Rationalization for External Integrations
+
+**Issue:** When integrating with external APIs like GitHub Archive (`https://data.gharchive.org/`), proper timezone handling is critical.
+
+**Key Points:**
+
+1. **Always use UTC for time calculations**
+   - GitHub Archive uses UTC for all file naming: `{YYYY}-{MM}-{DD}-{HH}.json.gz`
+   - Cloud Scheduler is configured with `time_zone = "UTC"`
+   - Script uses `date -u` flags for UTC consistency
+
+2. **Hour precision matters**
+   - Files are named with hour: `2026-03-05-12.json.gz` (not just `2026-03-05.json.gz`)
+   - The hour field `-H` must be included in the filename format
+   - Files are typically available 1-2 hours after the hour ends
+
+3. **Date format string bug (fixed)**
+   - Original bug: Missing `%d` in format string `'+%Y-%m-%-H'` produced `2026-03-12.json.gz` (hour interpreted as day!)
+   - Fixed: Use `'+%Y-%m-%d-%-H'` to produce correct `2026-03-05-12.json.gz`
+   - Always verify date format strings produce expected output
+
+4. **File availability considerations**
+   - Current hour's file returns 404 (not yet available)
+   - Use `HOURS_AGO=1` (default) to fetch previous hour's file
+   - Scheduler runs at `:30` past the hour to allow file generation
+
+**Example:**
+```bash
+# Current time: 2026-03-05 13:00 UTC
+# HOURS_AGO=1 should fetch: 2026-03-05-12.json.gz (previous hour)
+# HOURS_AGO=24 should fetch: 2026-03-04-13.json.gz (same time yesterday)
+
+# Verify file exists before attempting download:
+curl -sI "https://data.gharchive.org/2026-03-05-12.json.gz" | head -1
+# HTTP/2 200 = file exists
+# HTTP/2 404 = file not yet available
+```
