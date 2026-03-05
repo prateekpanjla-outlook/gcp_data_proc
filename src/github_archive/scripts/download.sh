@@ -15,7 +15,7 @@ set -euo pipefail
 # ==============================================================================
 
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project)}"
-BUCKET_NAME="${BUCKET_NAME:-${PROJECT_ID}-data-pipeline}"
+BUCKET_NAME="${BUCKET_NAME:-${PROJECT_ID}-github-archive-landing}"
 GITHUB_ARCHIVE_BASE="https://data.gharchive.org"
 HOURS_AGO="${HOURS_AGO:-1}"
 

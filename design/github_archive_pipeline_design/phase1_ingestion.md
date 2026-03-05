@@ -13,6 +13,14 @@ Phase 1 is responsible for downloading the hourly GitHub Archive file and landin
 - [Components](diagrams/ingestion_06_components.md) - Architecture view
 - [Improvements](diagrams/ingestion_07_improvements.md) - Refactoring opportunities
 
+**Design Documents:**
+- [gsutil-based Cloud Run Job Design](cloud_run_job_gsutil_design.md) - Full design rationale
+- [Terraform Configuration](terraform_gsutil_config.md) - Infrastructure as Code
+
+**Implementation:**
+- [`src/github_archive/Dockerfile.job`](../../src/github_archive/Dockerfile.job) - Container definition
+- [`src/github_archive/scripts/download.sh`](../../src/github_archive/scripts/download.sh) - Download script
+
 ---
 
 ## High-Level Flow
@@ -22,33 +30,107 @@ GitHub Archive (https://data.gharchive.org/)
         │
         │ Cloud Scheduler (cron: 30 * * * *)
         ▼
-Cloud Run Job: hn-fetcher
-        │ downloads file
+Cloud Run Job: dev-github-archive-download-gsutil
+        │ gsutil cp (streams data)
         ▼
-Cloud Storage: gs://{project}-data-pipeline/github-archive/raw/YYYY-MM-DD-HH.json.gz
+Cloud Storage: gs://{project}-github-archive-landing/github-archive/raw/YYYY-MM-DD-HH.json.gz
 ```
+
+**Naming Convention:** Uses `dev-` prefix for development environment. Production uses `prod-` prefix.
+
+**Implementation:** Uses `google-cloud-sdk:slim` base image with gsutil for streaming downloads (memory-efficient).
 
 ---
 
 ## ENTRY Conditions (Pre-requirements)
 
-### Infrastructure Requirements
+### 1. Infrastructure (Static Resources)
 
-| Requirement | Type | Description |
-|-------------|------|-------------|
+| Resource | Type | Description |
+|----------|------|-------------|
 | `PROJECT_ID` | Env Var | Google Cloud project ID |
-| `BUCKET_NAME` | Env Var | Target Cloud Storage bucket name |
-| `REGION` | Env Var | GCP region (e.g., `us-central1`) |
-| Cloud Scheduler | Resource | Must be configured with hourly schedule |
-| Cloud Run Job | Resource | `hn-fetcher` job must be deployed |
-| Service Account | IAM | Must have `Storage.ObjectCreator` role |
+| `ENVIRONMENT` | Terraform Var | Environment prefix (`dev` or `prod`) |
+| `BUCKET_NAME` | Env Var | Target Cloud Storage bucket (e.g., `${PROJECT_ID}-dev-github-archive-landing`) |
+| `REGION` | Env Var | GCP region for resources (e.g., `us-central1`) |
+| `HOURS_AGO` | Env Var | Hours to look back for file (default: 1) |
+| Cloud Run Job | Resource | `${ENVIRONMENT}-github-archive-download-gsutil` |
+| Cloud Scheduler | Resource | `${ENVIRONMENT}-github-archive-download-job` |
+| Container Image | Artifact | Built from [`src/github_archive/Dockerfile.job`](../../src/github_archive/Dockerfile.job) |
 
-### External Dependencies
+### 2. One-Time Setup (Initial Deployment)
+
+**Service Account Creation:**
+
+```bash
+# Service account ID with environment prefix
+ENVIRONMENT="dev"  # or "prod" for production
+
+gcloud iam service-accounts create ${ENVIRONMENT}-github-archive-downloader \
+  --display-name="${ENVIRONMENT^} GitHub Archive Downloader"
+```
+
+**IAM Role Bindings:**
+
+| Role | Purpose | Command |
+|------|---------|---------|
+| `roles/storage.objectUser` | Create, read, list objects in GCS | `gcloud projects add-iam-policy-binding ${PROJECT_ID} --member="serviceAccount:${ENVIRONMENT}-github-archive-downloader@${PROJECT_ID}.iam.gserviceaccount.com" --role="roles/storage.objectUser"` |
+| `roles/logging.logWriter` | Write logs to Cloud Logging | `gcloud projects add-iam-policy-binding ${PROJECT_ID} --member="serviceAccount:${ENVIRONMENT}-github-archive-downloader@${PROJECT_ID}.iam.gserviceaccount.com" --role="roles/logging.logWriter"` |
+
+**Why `roles/storage.objectUser` instead of `roles/storage.objectCreator`?**
+
+| Operation | gsutil command | Required Permission | objectCreator | objectUser |
+|-----------|----------------|---------------------|---------------|------------|
+| Check if file exists | `gsutil stat` | `storage.objects.get` | ❌ No | ✅ Yes |
+| Upload file | `gsutil cp` | `storage.objects.create` | ✅ Yes | ✅ Yes |
+| Verify upload | `gsutil du` | `storage.objects.get` | ❌ No | ✅ Yes |
+
+**Deployer Permissions (for the person deploying):**
+
+| Permission | Purpose |
+|------------|---------|
+| `roles/iam.serviceAccountUser` on `${ENVIRONMENT}-github-archive-downloader` SA | Required to attach SA to Cloud Run Job |
+| `roles/run.developer` on the project | Required to deploy Cloud Run Jobs |
+| `roles/cloudbuild.builds.builder` | Required to build container images (if using Cloud Build) |
+
+**Storage Bucket Creation:**
+
+```bash
+# Bucket name with environment prefix
+ENVIRONMENT="dev"  # or "prod"
+BUCKET_NAME="${PROJECT_ID}-${ENVIRONMENT}-github-archive-landing"
+
+# Create bucket with uniform access
+gsutil mb -p ${PROJECT_ID} -l ${REGION} gs://${BUCKET_NAME}
+```
+
+**Source:** [Google Cloud Official Documentation - Cloud Storage Volume Mounts](https://cloud.google.com/run/docs/configuring/jobs/cloud-storage-volume-mounts)
+
+### 3. Daily / Operational (Runtime Requirements)
+
+**External Dependencies:**
 
 | Dependency | URL | Availability |
 |------------|-----|--------------|
 | GitHub Archive | `https://data.gharchive.org/` | Public, no auth required |
-| File Format | `{YYYY}-{MM}-{DD}-{HH}.json.gz` | Files available within 1-2 hours |
+| File Naming Pattern | `{YYYY}-{MM}-{DD}-{HH}.json.gz` | Files available within 1-2 hours after hour ends |
+
+**Runtime Environment Variables:**
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| `BUCKET_NAME` | Terraform / Cloud Run config | Target GCS bucket |
+| `PROJECT_ID` | Terraform / Cloud Run config | GCP project ID |
+| `HOURS_AGO` | Cloud Run config | How many hours back to look (default: 1) |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Automatic (in Cloud Run) | Service account key (auto-injected) |
+
+**Operational Prerequisites:**
+
+| Condition | Check | Action if Failed |
+|-----------|-------|------------------|
+| Cloud Run Job is healthy | `gcloud run jobs describe ${ENVIRONMENT}-github-archive-download-gsutil` | Redeploy job |
+| Scheduler is active | `gcloud scheduler jobs describe ${ENVIRONMENT}-github-archive-download-job` | Check schedule |
+| Bucket is accessible | `gsutil ls gs://${BUCKET_NAME}` | Check IAM permissions |
+| Service account has permissions | `gcloud projects get-iam-policy ${PROJECT_ID}` | Grant missing roles |
 
 ---
 
@@ -158,6 +240,21 @@ except gzip.BadGzipFile:
 
 ### Step 5: Upload to Cloud Storage
 
+**Implementation: gsutil-based (Streaming)**
+
+```bash
+# From src/github_archive/scripts/download.sh
+# gsutil streams data directly - memory efficient (~50MB constant usage)
+
+SOURCE_URL="https://data.gharchive.org/${FILENAME}"
+GCS_PATH="gs://${BUCKET_NAME}/github-archive/raw/${FILENAME}"
+
+# Upload with streaming
+gsutil cp "${SOURCE_URL}" "${GCS_PATH}"
+```
+
+**Alternative: Python Client Library (Original)**
+
 ```python
 from google.cloud import storage
 
@@ -175,24 +272,24 @@ blob.upload_from_string(
 **Entry Conditions:**
 | Condition | Value | Source |
 |-----------|-------|--------|
-| `compressed_data` | Valid gzip bytes | Step 4 |
+| `compressed_data` | Valid gzip bytes | Step 4 (Python only) |
 | `BUCKET_NAME` | Existing bucket | Terraform/Manual |
 | `PROJECT_ID` | Valid project | Environment |
-| Service Account | Has `roles/storage.objectCreator` | IAM |
+| Service Account | Has `roles/storage.objectUser` | IAM |
 
 **Exit Conditions:**
 | Condition | Value | Verification |
 |-----------|-------|-------------|
-| Upload Success | `blob.exists() == True` | `blob.upload_from_string()` |
-| File Size | `blob.size == len(compressed_data)` | Integrity check |
-| Content Type | `blob.content_type == "application/gzip"` | Correct MIME type |
+| Upload Success | `gsutil stat` returns 0 | File exists in GCS |
+| File Size | `gsutil du` shows size | Integrity check |
+| Content Type | `application/gzip` | Correct MIME type |
 
 **Failure Modes:**
 | Error | Cause | Action |
 |-------|-------|--------|
 | `NotFound` | Bucket doesn't exist | Create bucket first |
-| `PermissionDenied` | SA lacks permissions | Grant `Storage.ObjectCreator` |
-| `Network Error` | Upload interruption | Retry entire upload |
+| `PermissionDenied` | SA lacks permissions | Grant `roles/storage.objectUser` |
+| `Network Error` | Upload interruption | gsutil auto-retries 3x |
 
 ---
 
@@ -227,6 +324,63 @@ Phase 1 is **successful** when ALL of the following are true:
 
 ## CURRENT CODE LOCATION
 
+### gsutil-based Implementation (Recommended)
+
+**Files:**
+- [`src/github_archive/Dockerfile.job`](../../src/github_archive/Dockerfile.job) - Container definition
+- [`src/github_archive/scripts/download.sh`](../../src/github_archive/scripts/download.sh) - Download script
+
+**Dockerfile.job:**
+```dockerfile
+FROM gcr.io/google.com/cloud-sdk:slim
+
+# Install coreutils for date command
+RUN apt-get update && apt-get install -y coreutils && rm -rf /var/lib/apt/lists/*
+
+# Copy download script
+COPY scripts/download.sh /scripts/download.sh
+RUN chmod +x /scripts/download.sh
+
+# Environment variables (set at runtime)
+ENV BUCKET_NAME=""
+ENV PROJECT_ID=""
+ENV HOURS_AGO="1"
+ENV GOOGLE_APPLICATION_CREDENTIALS=""
+
+ENTRYPOINT ["/scripts/download.sh"]
+```
+
+**download.sh (key operations):**
+```bash
+#!/bin/bash
+set -e
+
+# Calculate target filename
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    FILENAME=$(date -u -v-${HOURS_AGO}H +"%Y-%m-%d-%-H.json.gz")
+else
+    FILENAME=$(date -u -d "${HOURS_AGO} hours ago" +"%Y-%m-%d-%-H.json.gz")
+fi
+
+SOURCE_URL="https://data.gharchive.org/${FILENAME}"
+GCS_PATH="gs://${BUCKET_NAME}/github-archive/raw/${FILENAME}"
+
+# Check if file already exists (idempotency)
+if gsutil -q stat "${GCS_PATH}" 2>/dev/null; then
+    echo "File ${FILENAME} already exists in GCS, skipping download"
+    exit 0
+fi
+
+# Download and upload in one streaming operation (memory efficient)
+gsutil cp "${SOURCE_URL}" "${GCS_PATH}"
+
+# Verify upload
+SIZE=$(gsutil du "${GCS_PATH}" | awk '{print $1}')
+echo "Successfully uploaded ${FILENAME} (${SIZE} bytes)"
+```
+
+### Original Python Implementation (Legacy)
+
 **File:** [`src/github_archive/main.py`](../../src/github_archive/main.py)
 **Function:** `download_github_archive()` (lines 127-176)
 
@@ -238,7 +392,7 @@ def download_github_archive():
     filename = target_time.strftime("%Y-%m-%d-%-H.json.gz")
     url = f"https://data.gharchive.org/{filename}"
 
-    # Download
+    # Download (loads entire file into memory - NOT recommended for large files)
     with urlopen(url, timeout=300) as response:
         compressed_data = response.read()
 
@@ -256,34 +410,41 @@ def download_github_archive():
     return jsonify({"message": "File downloaded and uploaded", ...})
 ```
 
+### Memory Comparison
+
+| Implementation | Memory Usage | Notes |
+|----------------|--------------|-------|
+| Python (original) | ~1.2 GB peak | Loads entire file into RAM |
+| gsutil (recommended) | ~50 MB constant | Streams data directly |
+
 ---
 
-## IMPROVEMENTS NEEDED
+## IMPLEMENTATION STATUS
 
-### 1. Streaming Download (Memory Issue)
+### Completed (gsutil-based Implementation)
 
-**Current Problem:** Downloads entire file (~1.2 GB) into memory.
+| Feature | Status | Implementation |
+|---------|--------|----------------|
+| Streaming download | ✅ Complete | Uses `gsutil cp` for direct streaming |
+| Memory efficiency | ✅ Complete | ~50MB constant usage vs ~1.2GB peak |
+| File existence check | ✅ Complete | `gsutil stat` before download |
+| Cross-platform date | ✅ Complete | Linux/macOS detection in download.sh |
+| Service account setup | ✅ Documented | See Service Account Permissions above |
 
-**Solution:**
-```python
-# Stream directly to GCS without loading entire file in memory
-from google.cloud import storage
+### Design Documents
 
-bucket = storage.Client().bucket(BUCKET_NAME)
-blob = bucket.blob(f"github-archive/raw/{filename}")
+| Document | Description |
+|----------|-------------|
+| [gsutil-based Design](cloud_run_job_gsutil_design.md) | Full design rationale |
+| [Terraform Configuration](terraform_gsutil_config.md) | Infrastructure as Code |
 
-# Stream from URL to GCS
-with urlopen(url) as response:
-    with blob.open("wb") as f:
-        while chunk := response.read(1024 * 1024):  # 1MB chunks
-            f.write(chunk)
-```
+### Future Enhancements
 
-### 2. Better Retry Logic
+**1. Better Retry Logic**
 
-**Current:** No retry for HTTP failures.
+**Current:** gsutil has built-in retry (3 attempts).
 
-**Solution:**
+**Enhancement:**
 ```python
 from src.shared.retry import retry_with_exponential_backoff
 
@@ -294,67 +455,186 @@ from src.shared.retry import retry_with_exponential_backoff
     multiplier=2
 )
 def download_from_github_archive(url: str) -> bytes:
-    with urlopen(url, timeout=300) as response:
-        return response.read()
-```
-
-### 3. File Existence Check
-
-**Current:** Assumes file needs to be downloaded every time.
-
-**Solution:**
-```python
-# Check if file already exists in GCS
-blob = bucket.blob(f"github-archive/raw/{filename}")
-if blob.exists():
-    logger.info(f"File {filename} already exists, skipping download")
-    return {"status": "already_exists"}
+    # Wrapper for gsutil with additional retry logic
+    ...
 ```
 
 ---
 
 ## MONITORING
 
+### Cloud Logging
+
+The download.sh script outputs structured logs:
+
+| Log Message | Level | Meaning |
+|-------------|-------|---------|
+| `File ${FILENAME} already exists in GCS, skipping download` | INFO | Idempotent skip (not an error) |
+| `Successfully uploaded ${FILENAME} (${SIZE} bytes)` | INFO | Success |
+| `Failed to download ${FILENAME}` | ERROR | Download failed |
+| `gsutil cp failed` | ERROR | Upload failed |
+
 ### Metrics to Track
 
 | Metric | Description | Target |
 |--------|-------------|--------|
-| `download_duration_ms` | Time to download file | < 300 seconds |
-| `file_size_bytes` | Size of downloaded file | ~1.2 GB |
-| `upload_duration_ms` | Time to upload to GCS | < 60 seconds |
-| `download_success` | Download succeeded | 100% |
-| `download_retries` | Number of retries | < 6 |
+| `job_execution_time` | Total job duration | < 300 seconds |
+| `file_size_bytes` | Size of downloaded file | ~1.2 GB (varies by hour) |
+| `job_success` | Job completed successfully | 100% |
+| `file_already_exists_count` | Idempotent skips | Info only |
+
+### Cloud Run Job Metrics
+
+Available in Cloud Monitoring:
+- `run.googleapis.com/job/completions` - Number of successful job completions
+- `run.googleapis.com/job/attempts` - Number of job execution attempts
+- `run.googleapis.com/job/latencies` - Job execution duration
 
 ### Alert Conditions
 
 | Condition | Severity | Action |
 |-----------|----------|--------|
-| Download fails for > 30 min | Warning | Investigate GitHub Archive status |
-| File size < 100 MB | Warning | Possible partial download |
-| Upload fails | Error | Check GCS bucket & permissions |
+| Job fails 3 consecutive times | **ERROR** | Check GitHub Archive status, GCS permissions |
+| File size < 100 MB | **WARNING** | Possible partial download or quiet hour |
+| Job execution time > 600 seconds | **WARNING** | Performance degradation |
+| File already exists < 10% of runs | **INFO** | Normal operation (idempotency working) |
 
 ---
 
 ## TERRAFORM CONFIGURATION
 
+### Variables
+
+**File:** [`terraform/variables.tf`](../../terraform/variables.tf)
+
+```hcl
+variable "project_id" {
+  description = "Google Cloud project ID"
+  type        = string
+}
+
+variable "region" {
+  description = "GCP region for resources"
+  type        = string
+  default     = "us-central1"
+}
+
+variable "environment" {
+  description = "Environment name (dev, prod)"
+  type        = string
+  default     = "dev"
+
+  validation {
+    condition     = contains(["dev", "prod"], var.environment)
+    error_message = "Environment must be either 'dev' or 'prod'."
+  }
+}
+```
+
+### Locals (Helper Values)
+
+**File:** [`terraform/locals.tf`](../../terraform/locals.tf)
+
+```hcl
+locals {
+  # Resource name prefixes
+  name_prefix = "${var.environment}-github-archive"
+
+  # Full resource names
+  service_account_id = "${local.name_prefix}-downloader"
+  bucket_name         = "${var.project_id}-${local.name_prefix}-landing"
+  job_name            = "${local.name_prefix}-download-gsutil"
+  scheduler_name      = "${local.name_prefix}-download-job"
+}
+```
+
+### Service Account
+
+**File:** [`terraform/service_accounts.tf`](../../terraform/service_accounts.tf)
+
+```hcl
+resource "google_service_account" "github_archive_downloader" {
+  account_id   = local.service_account_id
+  display_name = "${title(var.environment)} GitHub Archive Downloader"
+  description  = "Service account for Cloud Run Job that downloads GitHub Archive files"
+}
+
+resource "google_project_iam_member" "github_archive_downloader_storage" {
+  project = var.project_id
+  role    = "roles/storage.objectUser"
+  member  = "serviceAccount:${google_service_account.github_archive_downloader.email}"
+}
+
+resource "google_project_iam_member" "github_archive_downloader_logging" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.github_archive_downloader.email}"
+}
+```
+
+### Cloud Run Job
+
+**File:** [`terraform/cloud_run_jobs.tf`](../../terraform/cloud_run_jobs.tf)
+
+```hcl
+resource "google_cloud_run_v2_job" "github_archive_downloader" {
+  name     = local.job_name
+  location = var.region
+  project  = var.project_id
+
+  template {
+    template {
+      containers {
+        image = "gcr.io/google.com/cloud-sdk:slim"
+
+        # Environment variables
+        env {
+          name  = "BUCKET_NAME"
+          value = google_storage_bucket.github_archive_landing.name
+        }
+        env {
+          name  = "PROJECT_ID"
+          value = var.project_id
+        }
+        env {
+          name  = "HOURS_AGO"
+          value = "1"
+        }
+
+        # Resource limits
+        resources {
+          limits = {
+            cpu    = "1"
+            memory = "256Mi"
+          }
+        }
+      }
+
+      # Service account
+      service_account_name = google_service_account.github_archive_downloader.email
+
+      # Timeout
+      timeout_seconds = 1800  # 30 minutes
+    }
+  }
+}
+```
+
+### Cloud Scheduler
+
 **File:** [`terraform/scheduler.tf`](../../terraform/scheduler.tf)
 
 ```hcl
 resource "google_cloud_scheduler_job" "github_archive_downloader" {
-  name        = "github-archive-downloader"
+  name        = local.scheduler_name
   schedule    = "30 * * * *"  # 30 minutes past each hour
   time_zone   = "UTC"
 
   http_target {
     http_method = "POST"
-    uri         = "https://{region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/{project}/jobs/hn-fetcher:run"
+    uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${var.project_id}/jobs/${local.job_name}:run"
 
-    body = base64encode(jsonencode({
-      hours_ago = 1,
-      bucket_name = "{project}-data-pipeline"
-    }))
-
-    oauth_token {
+    oidc_token {
       service_account_email = google_service_account.scheduler.email
     }
   }
@@ -362,6 +642,28 @@ resource "google_cloud_scheduler_job" "github_archive_downloader" {
   retry_config {
     retry_count = 2
     min_backoff = "10s"
+  }
+}
+```
+
+### Storage Bucket
+
+**File:** [`terraform/storage.tf`](../../terraform/storage.tf)
+
+```hcl
+resource "google_storage_bucket" "github_archive_landing" {
+  name          = local.bucket_name
+  location      = var.region
+  force_destroy = false
+  uniform_level_access = true
+
+  lifecycle_rule {
+    condition {
+      age = 90  # Delete files after 90 days
+    }
+    action {
+      type = "Delete"
+    }
   }
 }
 ```

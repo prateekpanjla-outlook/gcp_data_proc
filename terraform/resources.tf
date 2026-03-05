@@ -30,6 +30,35 @@ resource "google_project_iam_member" "processor_logging_user" {
 # ==============================================================================
 # Cloud Storage Buckets
 # ==============================================================================
+
+# GitHub Archive Landing Bucket (Phase 1: Ingestion)
+# Raw GitHub Archive files are downloaded here
+resource "google_storage_bucket" "github_archive_landing" {
+  name          = local.github_archive.bucket_name
+  project       = var.project_id
+  location      = var.region
+  force_destroy = var.environment == "dev" ? true : false
+
+  uniform_bucket_level_access = true
+
+  lifecycle_rule {
+    condition {
+      age = 90  # Delete files after 90 days
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  labels = {
+    environment = var.environment
+    source      = "github-archive"
+    layer       = "landing"
+    managed_by  = "terraform"
+  }
+}
+
+# GitHub Archive Processed Data Bucket
 resource "google_storage_bucket" "github_data" {
   name          = "${var.github_bucket_name}-${var.environment}"
   project       = var.project_id
