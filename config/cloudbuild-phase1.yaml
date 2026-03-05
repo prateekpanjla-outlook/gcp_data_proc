@@ -24,10 +24,6 @@ steps:
       - 'gcr.io/$PROJECT_ID/github-archive-downloader:${SHORT_SHA}'
       - 'gcr.io/$PROJECT_ID/github-archive-downloader:latest'
 
-# Cloud Build substitutions
-substitutions:
-  _REGION: us-central1
-
 # Images built by this pipeline
 images:
   - 'gcr.io/$PROJECT_ID/github-archive-downloader:${SHORT_SHA}'
