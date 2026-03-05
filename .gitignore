@@ -46,6 +46,7 @@ htmlcov/
 # Google Cloud
 *.pem
 service-account.json
+secrets/
 
 # Data files
 *.json.gz
