@@ -10,8 +10,8 @@ graph LR
 
     subgraph Process["PROCESSING"]
         V1[Layer 1: File Validation<br>extension, size, gzip]
-        V2[Layer 2: Line Validation<br>valid JSON, required fields]
-        V3[Layer 3: Schema Validation<br>Pydantic models]
+        V2[Layer 2: Pandas JSON Parsing<br>chunked reading]
+        V3[Layer 3: Dtype + Value Validation<br>vectorized operations]
         V4[Layer 4: Transform<br>flatten nested objects]
     end
 

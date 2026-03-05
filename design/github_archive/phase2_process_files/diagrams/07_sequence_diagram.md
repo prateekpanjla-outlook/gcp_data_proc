@@ -7,9 +7,9 @@ sequenceDiagram
     participant P as Pub/Sub
     participant CRS as Cloud Run Service
     participant CRJ as Cloud Run Job
-    participant FS as Firestore
     participant STG as Staging Bucket
-    participant DLQ as DLQ Bucket
+    participant BQ as BigQuery
+    participant LOG as Cloud Logging
 
     Note over S: File lands: 2026-03-05-12.json.gz
     S->>E: finalize event
@@ -22,16 +22,18 @@ sequenceDiagram
 
     alt File size < 500MB
         CRS->>S: Download file
-        CRS->>CRS: Stream read line by line
+        CRS->>CRS: Pandas chunked processing<br/>chunksize=100K
 
-        loop For each line
-            CRS->>CRS: Validate JSON
-            CRS->>CRS: Validate schema (Pydantic)
-            CRS->>CRS: Transform & flatten
+        loop For each chunk (100K records)
+            CRS->>CRS: Parse JSON (pd.read_json)
+            CRS->>CRS: Validate dtypes (vectorized)
+            CRS->>CRS: Validate values (vectorized)
+            CRS->>CRS: Transform & flatten (vectorized)
+            CRS->>STG: Write chunk output immediately
         end
 
-        CRS->>STG: Upload processed .ndjson.gz
-        CRS->>FS: Mark complete
+        CRS->>BQ: Trigger BigQuery load
+        CRS->>LOG: Log completion
 
     else File size >= 500MB
         CRS->>CRJ: Execute file-splitter job
@@ -41,29 +43,27 @@ sequenceDiagram
 
         loop For each chunk (10K lines)
             CRJ->>S: Upload chunk to chunks/
-            CRJ->>FS: Create chunk document
             CRJ->>P: Publish chunk event
         end
 
         CRJ->>S: Delete original file
+        CRJ->>LOG: Log split complete
 
         Note over P: N chunk events published
 
         loop For each chunk event
             P->>CRS: HTTP POST /process-chunk
             CRS->>S: Download chunk
-            CRS->>CRS: Process chunk (validate, transform)
+            CRS->>CRS: Process chunk with Pandas<br/>validate dtypes + values (vectorized)
             CRS->>STG: Upload chunk output
-            CRS->>FS: Update chunk status
+            CRS->>BQ: Trigger BigQuery load (per chunk)
+            CRS->>LOG: Log chunk completion
         end
-
-        CRS->>FS: Check all chunks done
-        Note over FS: All chunks complete
-        CRS->>CRS: Trigger BigQuery load
     end
 
     alt Validation errors
-        CRS->>DLQ: Move to DLQ
+        CRS->>LOG: Log error details
+        CRS->>LOG: Increment error counter
     end
 
     CRS->>P: ACK completion
@@ -71,6 +71,6 @@ sequenceDiagram
 
 **Sequence Notes:**
 - Small files processed directly in single request
-- Large files split first, then processed in parallel
-- Each chunk processed independently (autoscaling)
-- Firestore tracks progress for large files
+- Large files split first, then processed in parallel via Pub/Sub
+- Each chunk triggers BigQuery load immediately upon completion (no state tracking)
+- All errors logged to Cloud Logging with monitoring alerts

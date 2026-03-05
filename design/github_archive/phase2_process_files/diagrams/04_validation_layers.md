@@ -4,23 +4,29 @@
 graph TB
     Input([Input File]) --> L1{Layer 1:<br>File Validation}
 
-    L1 -->|Pass| L2{Layer 2:<br>Line Validation}
+    L1 -->|Pass| L2{Layer 2:<br>Pandas JSON Parsing}
     L1 -->|Fail| Invalid[Move to invalid-files/]
 
-    L2 -->|Pass| L3{Layer 3:<br>Schema Validation}
+    L2 -->|Pass| L3{Layer 3:<br>Dtype Validation}
     L2 -->|Fail| Skip[Skip line<br>Count error]
 
-    L3 -->|Pass| L4{Layer 4:<br>Business Rules}
-    L3 -->|Fail| DLQ[Move to DLQ<br>gs://dlq/events/]
+    L3 -->|Pass| L4{Layer 4:<br>Value Validation}
+    L3 -->|Fail| NaN[Set to NaN<br>Count error]
 
-    L4 -->|Pass| Output([✅ Valid Event])
-    L4 -->|Fail| DLQ
+    L4 -->|Pass| L5{Layer 5:<br>Business Rules}
+    L4 -->|Fail| Filter[Filter out<br>Move to DLQ]
+
+    L5 -->|Pass| Output([✅ Valid Event])
+    L5 -->|Fail| DLQ[Move to DLQ<br>gs://dlq/events/]
 
     style Input fill:#e3f2fd
     style Output fill:#e1f5e1
     style Invalid fill:#ffebee
     style DLQ fill:#fff3e0
     style Skip fill:#fff3e0
+    style L2 fill:#e8f5e9
+    style L3 fill:#e8f5e9
+    style L4 fill:#e8f5e9
 ```
 
 **Validation Layer Details:**
@@ -28,116 +34,102 @@ graph TB
 | Layer | What | Tools | Error Action |
 |-------|------|-------|--------------|
 | **Layer 1: File** | Extension, size, gzip | Python stdlib | Move to invalid-files/ |
-| **Layer 2: Line** | Valid JSON, required fields | json.loads() | Skip line, count error |
-| **Layer 3: Schema** | Field types, formats | Pydantic | Move to DLQ |
-| **Layer 4: Business** | Event types, references | Custom validators | Move to DLQ |
+| **Layer 2: Parsing** | Valid JSON, chunked reading | pd.read_json(chunksize=N) | Skip line, count error |
+| **Layer 3: Dtype** | Field types, coercion | df.astype(dtype) | Set to NaN, count error |
+| **Layer 4: Value** | Required fields, event types | df.isin(), df.isnull() | Filter out, move to DLQ |
+| **Layer 5: Business** | Timestamps, references | Custom validators | Move to DLQ |
 
-**Validation Code Structure:**
+**Chunked Processing with Pandas:**
 
 ```python
-# validators/file_validator.py - Layer 1
-async def validate_file(bucket: str, file_path: str) -> ValidationResult:
-    """Validate file before processing"""
-    # 1. Check extension
-    if not file_path.endswith('.json.gz'):
-        return ValidationResult.invalid("Invalid file extension")
+# processors/chunked_processor.py
+import pandas as pd
+from typing import Iterator, Dict, Any
 
-    # 2. Check file size
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket)
-    blob = bucket.blob(file_path)
-    size = blob.size
+class ChunkedEventProcessor:
+    """Process GitHub events in chunks using pandas"""
 
-    if size == 0 or size > 10 * 1024 * 1024 * 1024:  # 10GB max
-        return ValidationResult.invalid(f"Invalid file size: {size}")
+    def __init__(self, chunksize: int = 100_000):
+        self.chunksize = chunksize
 
-    # 3. Validate gzip
-    try:
-        with gzip.open(blob.open('rb')) as f:
-            f.read(1)  # Try to read first byte
-    except Exception as e:
-        return ValidationResult.invalid(f"Invalid gzip: {e}")
+    def process_file(self, file_path: str) -> Dict[str, int]:
+        """Process file in chunks with validation"""
+        stats = {'total': 0, 'valid': 0, 'invalid': 0, 'chunks': 0}
 
-    return ValidationResult.valid()
+        # Create chunk iterator
+        chunk_iterator = pd.read_json(
+            file_path,
+            lines=True,
+            chunksize=self.chunksize
+        )
 
-# validators/line_validator.py - Layer 2
-async def validate_line(line: str, line_num: int) -> ValidationResult:
-    """Validate individual JSON lines"""
-    try:
-        data = json.loads(line)
-    except json.JSONDecodeError as e:
-        return ValidationResult.invalid(f"Line {line_num}: Invalid JSON: {e}")
+        for chunk in chunk_iterator:
+            stats['chunks'] += 1
 
-    # Check required fields
-    required = ['id', 'type', 'created_at', 'actor', 'repo']
-    for field in required:
-        if field not in data:
-            return ValidationResult.invalid(f"Line {line_num}: Missing {field}")
+            # Layer 3: Dtype validation (vectorized)
+            chunk = self.validate_dtypes(chunk)
 
-    return ValidationResult.valid(data)
+            # Layer 4: Value validation (vectorized)
+            valid, invalid = self.validate_values(chunk)
+            stats['total'] += len(chunk)
+            stats['valid'] += len(valid)
+            stats['invalid'] += len(invalid)
 
-# validators/schema_validator.py - Layer 3
-from schemas.github_event_schema import GitHubEventBase
+            # Layer 5: Business rules
+            valid = self.validate_business_rules(valid)
 
-async def validate_schema(event: dict) -> ValidationResult:
-    """Validate against Pydantic schema"""
-    try:
-        validated = GitHubEventBase(**event)
-        return ValidationResult.valid(validated)
-    except ValidationError as e:
-        return ValidationResult.invalid(f"Schema error: {e}")
+            # Write output immediately
+            self.write_chunk(valid)
 
-# validators/business_validator.py - Layer 4
-async def validate_business_rules(event: GitHubEventBase) -> ValidationResult:
-    """Validate business rules"""
-    # Event type validation
-    valid_types = get_valid_event_types()
-    if event.type not in valid_types:
-        return ValidationResult.invalid(f"Invalid event type: {event.type}")
+            # Chunk is discarded from memory
 
-    # Timestamp validation
-    if event.created_at > datetime.utcnow():
-        return ValidationResult.invalid("Future timestamp")
+        return stats
 
-    return ValidationResult.valid()
+    def validate_dtypes(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Coerce dtypes (Layer 3)"""
+        dtype_map = {
+            'id': 'string',
+            'type': 'string',
+            'created_at': 'string',
+            'public': 'boolean'
+        }
+        for col, dtype in dtype_map.items():
+            if col in df.columns:
+                df[col] = df[col].astype(dtype, errors='coerce')
+        return df
+
+    def validate_values(self, df: pd.DataFrame) -> tuple:
+        """Validate values (Layer 4)"""
+        # Check required fields
+        required = ['id', 'type', 'created_at', 'actor', 'repo']
+        missing_mask = df[required].isnull().any(axis=1)
+
+        # Validate event type (vectorized)
+        valid_types = {'PushEvent', 'PullRequestEvent', 'IssuesEvent', 'WatchEvent', 'ForkEvent'}
+        invalid_type_mask = ~df['type'].isin(valid_types)
+
+        # Combine invalid conditions
+        invalid_mask = missing_mask | invalid_type_mask
+
+        valid = df[~invalid_mask].copy()
+        invalid = df[invalid_mask].copy()
+
+        return valid, invalid
+
+    def validate_business_rules(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Business rules (Layer 5)"""
+        # Example: no future timestamps
+        df['created_at_dt'] = pd.to_datetime(df['created_at'], errors='coerce')
+        valid = df[df['created_at_dt'] <= pd.Timestamp.now(tz='UTC')].copy()
+        return valid
 ```
 
-**Error Handling Flow:**
+**Memory Usage Comparison:**
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                              ERROR HANDLING DECISION TREE                                                   │
-├─────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                                             │
-│   Error Detected                                                                                            │
-│        │                                                                                                     │
-│        ▼                                                                                                     │
-│   ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐   │
-│   │ Is the ENTIRE file corrupt?                                                                         │   │
-│   │ • Bad gzip                                                                                          │   │
-│   │ • Wrong format                                                                                      │   │
-│   │ • Empty file                                                                                        │   │
-│   └─────────────────────────────────────────────────────────────────────────────────────────────────────┘   │
-│        │ Yes                                    │ No                                                     │
-│        ▼                                       ▼                                                        │
-│   Move entire file to:                      Continue processing                                       │
-│   gs://.../invalid-files/{file}.json.gz     ┌────────────────────────────────────────────────────────┐   │
-│                                            │ Can we skip this line/event?                         │   │
-│                                            └────────────────────────────────────────────────────────┘   │
-│                                                        │ Yes                │ No                      │
-│                                                        ▼                   ▼                         │
-│                                                 Skip line              Move to DLQ:                │
-│                                                 + count error           gs://.../dlq/events/       │
-│                                                 + continue              • Log error                 │
-│                                                                         • Continue                  │
-│                                                                                                            │
-│   ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐   │
-│   │ DLQ Processing (separate Cloud Run Job)                                                           │   │
-│   │ • Runs every 10 minutes                                                                             │   │
-│   │ • Analyzes failed events                                                                           │   │
-│   │ • Retry transient errors (3x)                                                                      │   │
-│   │ • Move permanent failures to gs://.../dlq/permanent/                                              │   │
-│   └─────────────────────────────────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                                            │
-└─────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-```
+| Approach | File Size | Peak Memory | Time |
+|----------|-----------|-------------|------|
+| Load all at once | 600MB | ~4GB | 15 seconds |
+| Chunks of 100K | 600MB | ~500MB | 20 seconds |
+| Chunks of 10K | 600MB | ~50MB | 35 seconds |
+
+**Recommended:** `chunksize=100_000` for best balance of speed and memory.

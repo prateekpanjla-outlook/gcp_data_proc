@@ -11,70 +11,94 @@ graph TD
     Check -->|System failure| SysErr[System Error]
 
     FileErr --> FileAction[Move entire file<br>to invalid-files/]
-    FileAction --> LogFile[Log error<br>Mark as failed]
-    LogFile --> EndFile([❌ File Failed])
+    FileAction --> LogFile[Log error details]
+    LogFile --> AlertFile[Cloud Monitoring Alert]
+    AlertFile --> EndFile([❌ File Failed])
 
     LineErr --> LineAction[Skip line<br>Count error<br>Continue processing]
     LineAction --> LogLine[Increment error counter]
     LogLine --> CheckRate{Error rate > 10%?}
-    CheckRate -->|Yes| Abort[Abort processing<br>Move to DLQ]
+    CheckRate -->|Yes| Abort[Abort processing<br>Log critical error]
     CheckRate -->|No| ContinueLine([Continue next line])
-    Abort --> DLQ
+    Abort --> AlertRate[Alert team]
+    AlertRate --> EndAbort([❌ Processing Aborted])
 
-    SchemaErr --> Retry{Retry count < 3?}
-    BizErr --> Retry
-    SysErr --> Retry
+    SchemaErr --> LogSchema[Log schema violation<br>Continue with valid records]
+    BizErr --> LogBiz[Log business rule violation<br>Continue with valid records]
+    SysErr --> LogSys[Log system error<br>Continue processing]
 
-    Retry -->|Yes| Wait[Wait: 2^n seconds<br>exponential backoff]
-    Wait --> RetryLoop[Retry processing]
-    RetryLoop --> Check
-
-    Retry -->|No| DLQ[Move to DLQ<br>gs://.../dlq/events/]
-    DLQ --> LogDLQ[Log failure details]
-    LogDLQ --> CheckFatal{Fatal error?}
-
-    CheckFatal -->|Yes| Permanent[Move to<br>dlq/permanent/]
-    CheckFatal -->|No| ScheduleRetry[Schedule DLQ processor<br>retry in 10 min]
-
-    Permanent --> EndPerm([❌ Permanent Failure])
-    ScheduleRetry --> EndRetry([⏳ Scheduled Retry])
+    LogSchema --> ContinueSchema([Continue processing])
+    LogBiz --> ContinueBiz([Continue processing])
+    LogSys --> ContinueSys([Continue processing])
 
     style FileErr fill:#ffebee
     style LineErr fill:#fff3e0
     style SchemaErr fill:#ffe0b2
     style BizErr fill:#e1f5fe
     style SysErr fill:#f3e5f5
-    style DLQ fill:#fff3e0
-    style Permanent fill:#ffebee
+    style LogFile fill:#e3f2fd
+    style LogLine fill:#e3f2fd
+    style LogSchema fill:#e3f2fd
+    style LogBiz fill:#e3f2fd
+    style LogSys fill:#e3f2fd
 ```
 
 **Error Categories:**
 
-| Category | Retry? | Destination | Example |
-|----------|--------|-------------|---------|
-| **File corrupted** | No | `invalid-files/` | Bad gzip, wrong format |
-| **Line malformed** | No | Skip, log | Invalid JSON |
-| **Schema error** | Yes (3x) | `dlq/events/` | Missing required field |
-| **Business rule** | Yes (3x) | `dlq/events/` | Invalid event type |
-| **Transient** | Yes (3x) | `dlq/events/` | Network timeout |
-| **Permanent** | No | `dlq/permanent/` | Invalid data structure |
+| Category | Action | Logging | Example |
+|----------|--------|---------|---------|
+| **File corrupted** | Move to `invalid-files/` | ERROR level | Bad gzip, wrong format |
+| **Line malformed** | Skip line, continue | WARN level + counter | Invalid JSON |
+| **Schema violation** | Skip record, continue | WARN level + counter | Missing required field |
+| **Business rule** | Skip record, continue | WARN level + counter | Invalid event type |
+| **System error** | Log, continue | ERROR level | Network timeout (non-fatal) |
+| **High error rate** | Abort processing | CRITICAL + alert | >10% errors |
 
-**DLQ Processor:**
+**Logging Strategy:**
 
 ```mermaid
 graph LR
-    DLQ[DLQ Topic] --> Processor[DLQ Processor<br>Cloud Run Job]
-    Processor --> Analyze[Analyze error]
+    subgraph Logs["Cloud Logging"]
+        ERR[Error Log Entry]
+        MET[Metrics & Counters]
+    end
 
-    Analyze --> Transient{Transient?}
-    Transient -->|Yes| Retry[Retry with backoff]
-    Transient -->|No| Permanent[Move to permanent/]
+    subgraph Alerts["Cloud Monitoring"]
+        POL[Error Rate Policy]
+        CRT[Critical Error Policy]
+    end
 
-    Retry --> Success{Success?}
-    Success -->|Yes| Staging[Send to staging]
-    Success -->|No| MaxRetry{Max retries?}
-    MaxRetry -->|< 3| Retry
-    MaxRetry -->|>= 3| Permanent
+    ERR --> POL
+    MET --> POL
+    CRT --> Notify[Email/PagerDuty]
 
-    Permanent --> Alert[Alert team]
+    style Logs fill:#e3f2fd
+    style Alerts fill:#fff3e0
+```
+
+**Log Entry Structure:**
+
+```json
+{
+  "severity": "ERROR",
+  "logName": "projects/my-project/logs/github-archive-processor",
+  "resource": {
+    "type": "cloud_run_revision",
+    "labels": {
+      "service_name": "github-archive-processor",
+      "revision_name": "github-archive-processor-0001"
+    }
+  },
+  "protoPayload": {
+    "@type": "type.googleapis.com/google.logging.audit"
+  },
+  "jsonPayload": {
+    "file": "2026-03-05-12.json.gz",
+    "error_type": "schema_violation",
+    "message": "Missing required field: actor.id",
+    "line_number": 12345,
+    "record_id": "9876543210",
+    "error_count": 1
+  }
+}
 ```

@@ -13,18 +13,17 @@ graph TB
     end
 
     subgraph Compute["PROCESSING LAYER - Cloud Run"]
-        CRS[Cloud Run Service<br>github-archive-processor<br>0-100 instances autoscaling]
+        CRS[Cloud Run Service<br>github-archive-processor<br>Pandas chunked processing<br>0-100 instances autoscaling]
         CRJ[Cloud Run Job<br>file-splitter<br>for files >= 500MB]
     end
 
     subgraph Storage["OUTPUT - Phase 2 Staging"]
         STG[Staging Bucket<br>gs://...-staging/processed/]
         CHK[Chunk Storage<br>gs://...-landing/chunks/]
-        DLQ[DLQ Bucket<br>gs://...-dlq/]
     end
 
-    subgraph Tracking["STATE TRACKING"]
-        FS[Firestore<br>file_chunks collection]
+    subgraph BigQuery["DATA WAREHOUSE"]
+        BQ[BigQuery<br>Load per chunk]
     end
 
     subgraph Monitoring["MONITORING"]
@@ -40,8 +39,7 @@ graph TB
     CRS -->|large file| CRJ
     CRJ -->|chunk events| PUB
     CRS -->|processed| STG
-    CRS -->|errors| DLQ
-    CRS -->|updates| FS
+    STG -->|load| BQ
     CRS -->|logs| LOG
     CRS -->|metrics| MON
 
@@ -49,8 +47,7 @@ graph TB
     style CRS fill:#c8e6c9
     style CRJ fill:#fff3e0
     style STG fill:#e1f5e1
-    style DLQ fill:#ffebee
-    style FS fill:#f3e5f5
+    style BQ fill:#c8e6c9
 ```
 
 **Component Summary:**
@@ -60,11 +57,10 @@ graph TB
 | Eventarc Trigger | Trigger | Detects new files in raw/ |
 | Pub/Sub Topic | Messaging | Chunk events for large files |
 | Pub/Sub Subscription | Push | Delivers messages to Cloud Run |
-| Cloud Run Service | Compute | Main file processor (autoscaling) |
+| Cloud Run Service | Compute | Main processor with Pandas chunked processing (autoscaling) |
 | Cloud Run Job | Compute | File splitter for large files |
 | Staging Bucket | Storage | Processed files for BigQuery |
 | Chunks Bucket | Storage | Split file chunks |
-| DLQ Bucket | Storage | Failed events/files |
-| Firestore | Database | Chunk tracking state |
-| Cloud Logging | Monitoring | Execution logs |
+| BigQuery | Data Warehouse | Loads each chunk as finalized |
+| Cloud Logging | Monitoring | Execution logs & error tracking |
 | Cloud Monitoring | Monitoring | Metrics and alerts |

@@ -149,15 +149,9 @@ Phase 2 processes GitHub Archive files landed in GCS by Phase 1, validates, tran
 │                                                                                                             │
 │   Chunk Processing (Parallel):                                                                               │
 │   ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐   │
-│   │ Each chunk → Cloud Run Task → Process → Staging                                                    │   │
+│   │ Each chunk → Cloud Run Task → Process → Staging → BigQuery Load                                    │   │
 │   │ Chunks processed in parallel (autoscaling)                                                          │   │
-│   └─────────────────────────────────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                                             │
-│   Merge Tracking:                                                                                            │
-│   ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐   │
-│   │ Track original file → chunks mapping in Firestore                                                    │   │
-│   │ All chunks processed → Mark original file as complete                                               │   │
-│   │ Trigger BigQuery load for all chunks of original file                                                │   │
+│   │ Each chunk triggers BigQuery load immediately upon completion                                      │   │
 │   └─────────────────────────────────────────────────────────────────────────────────────────────────────┘   │
 │                                                                                                             │
 └─────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -173,86 +167,172 @@ Phase 2 processes GitHub Archive files landed in GCS by Phase 1, validates, tran
 src/github_archive/phase2_process_files/
 ├── schemas/
 │   ├── __init__.py
-│   ├── github_event_schema.py     # Pydantic models for GitHub events
-│   ├── field_definitions.py       # Field type mappings
-│   └── validation_rules.py        # Validation logic
+│   ├── dtype_definitions.py      # Pandas dtype mappings for GitHub events
+│   ├── validation_rules.py        # Validation logic
+│   └── sample_data.py             # Sample data for testing
 └── ...
 ```
 
 ### Schema Definition Strategy
 
-**Option A: Pydantic Models (Chosen)**
+**Option: Pandas with Chunked Processing (Chosen)**
 
 ```python
-# schemas/github_event_schema.py
-from pydantic import BaseModel, Field, validator
-from typing import Optional, Dict, Any
-from datetime import datetime
+# schemas/dtype_definitions.py
+import pandas as pd
+from typing import Dict, Any
 
-class GitHubActor(BaseModel):
-    id: int = Field(..., description="GitHub user ID")
-    login: str = Field(..., description="GitHub username")
-    avatar_url: str = Field(..., description="Avatar URL")
-    gravatar_id: Optional[str] = None
-    url: str = Field(..., description="GitHub API URL")
-    type: str = Field(..., description="User type")
+# Define expected dtypes for GitHub events
+GITHUB_EVENT_DTYPES: Dict[str, str] = {
+    'id': 'string',
+    'type': 'string',
+    'created_at': 'string',
+    'public': 'boolean',
+}
 
-class GitHubRepo(BaseModel):
-    id: int = Field(..., description="Repository ID")
-    name: str = Field(..., description="Repository name (owner/repo)")
-    url: str = Field(..., description="Repository URL")
+# Nested fields (extracted during transformation)
+ACTOR_DTYPES: Dict[str, str] = {
+    'actor_id': 'int64',
+    'actor_login': 'string',
+    'actor_avatar_url': 'string',
+    'actor_gravatar_id': 'string',
+    'actor_type': 'string',
+}
 
-class GitHubEventBase(BaseModel):
-    id: str = Field(..., description="Event ID")
-    type: str = Field(..., description="Event type (PushEvent, etc.)")
-    created_at: datetime = Field(..., description="Event timestamp")
-    actor: GitHubActor
-    repo: GitHubRepo
-    payload: Dict[str, Any] = Field(default_factory=dict)
+REPO_DTYPES: Dict[str, str] = {
+    'repo_id': 'int64',
+    'repo_name': 'string',
+    'repo_url': 'string',
+}
 
-    @validator('type')
-    def validate_event_type(cls, v):
-        valid_types = {
-            'PushEvent', 'CreateEvent', 'DeleteEvent', 'WatchEvent',
-            'IssuesEvent', 'IssueCommentEvent', 'PullRequestEvent',
-            # ... all 18+ event types
+# Valid event types
+VALID_EVENT_TYPES = {
+    'PushEvent', 'CreateEvent', 'DeleteEvent', 'WatchEvent',
+    'IssuesEvent', 'IssueCommentEvent', 'PullRequestEvent',
+    'PullRequestReviewEvent', 'PullRequestReviewCommentEvent',
+    'ForkEvent', 'ReleaseEvent', 'MemberEvent', 'WatchEvent',
+    'GollumEvent', 'CommitCommentEvent', 'TeamAddEvent',
+    'ProtectBranchEvent'
+}
+
+class GitHubEventProcessor:
+    """Process GitHub events using pandas with chunked processing"""
+
+    def __init__(self, chunksize: int = 100_000):
+        self.chunksize = chunksize
+        self.stats = {
+            'total_records': 0,
+            'valid_records': 0,
+            'invalid_records': 0,
+            'chunks_processed': 0
         }
-        if v not in valid_types:
-            raise ValueError(f"Invalid event type: {v}")
-        return v
 
-class ProcessedGitHubEvent(BaseModel):
-    """Flattened schema for BigQuery loading"""
-    event_id: str
-    event_type: str
-    created_at: datetime
-    actor_id: int
-    actor_login: str
-    repo_id: int
-    repo_name: str
-    public: bool
-    # Payload fields (flattened based on event type)
-    payload_ref: Optional[str] = None
-    payload_push_id: Optional[int] = None
-    payload_size: Optional[int] = None
-    # ... more fields
+    def validate_dtypes(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Validate and coerce dtypes for a chunk"""
+        # Apply dtypes with coercion
+        for col, dtype in GITHUB_EVENT_DTYPES.items():
+            if col in df.columns:
+                try:
+                    df[col] = df[col].astype(dtype, errors='raise')
+                except (ValueError, TypeError):
+                    # Log coercion failures
+                    self.stats['invalid_records'] += df[col].isna().sum()
+
+        return df
+
+    def validate_values(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Validate values in a chunk"""
+        # Check required columns
+        required_cols = ['id', 'type', 'created_at', 'actor', 'repo']
+        missing_cols = set(required_cols) - set(df.columns)
+        if missing_cols:
+            raise ValueError(f"Missing columns: {missing_cols}")
+
+        # Check for null values in required fields
+        null_counts = df[required_cols].isnull().sum()
+        if null_counts.any():
+            null_fields = null_counts[null_counts > 0].to_dict()
+            print(f"Warning: Null values found - {null_fields}")
+
+        # Validate event type (vectorized)
+        invalid_mask = ~df['type'].isin(VALID_EVENT_TYPES)
+        invalid_count = invalid_mask.sum()
+
+        if invalid_count > 0:
+            print(f"Warning: {invalid_count} records have invalid event type")
+            # Filter out invalid types
+            df = df[~invalid_mask].copy()
+
+        return df
+
+    def extract_nested_fields(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Extract nested actor/repo fields (vectorized)"""
+        # Extract actor fields
+        df['actor_id'] = df['actor'].apply(
+            lambda x: x.get('id') if isinstance(x, dict) else None
+        )
+        df['actor_login'] = df['actor'].apply(
+            lambda x: x.get('login') if isinstance(x, dict) else None
+        )
+
+        # Extract repo fields
+        df['repo_id'] = df['repo'].apply(
+            lambda x: x.get('id') if isinstance(x, dict) else None
+        )
+        df['repo_name'] = df['repo'].apply(
+            lambda x: x.get('name') if isinstance(x, dict) else None
+        )
+
+        return df
+
+    def flatten_for_bigquery(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Flatten schema for BigQuery loading"""
+        result = pd.DataFrame({
+            'event_id': df['id'],
+            'event_type': df['type'],
+            'created_at': df['created_at'],
+            'actor_id': df['actor_id'],
+            'actor_login': df['actor_login'],
+            'repo_id': df['repo_id'],
+            'repo_name': df['repo_name'],
+            'public': df.get('public', True),
+        })
+        return result
+
+    def process_chunk(self, chunk: pd.DataFrame) -> pd.DataFrame:
+        """Process a single chunk"""
+        # Validate
+        chunk = self.validate_dtypes(chunk)
+        chunk = self.validate_values(chunk)
+
+        # Extract and flatten
+        chunk = self.extract_nested_fields(chunk)
+        flattened = self.flatten_for_bigquery(chunk)
+
+        # Update stats
+        self.stats['chunks_processed'] += 1
+        self.stats['total_records'] += len(chunk)
+        self.stats['valid_records'] += len(flattened)
+
+        return flattened
 ```
 
 **Benefits:**
-- Runtime validation
-- Type safety
-- Clear error messages
-- Easy to extend
+- Vectorized operations (2-10x faster than row-by-row)
+- Chunked processing controls memory usage
+- Efficient for large files (100K+ records)
+- Built-in type coercion and validation
 
 ### Validation Points
 
 | Validation Point | What | Where | Error Handling |
 |------------------|------|-------|----------------|
 | **Eventarc Trigger** | File path pattern | Eventarc filter | Non-matching files ignored |
-| **File Header** | Gzip validity | Process start | Move to DLQ |
-| **JSON Structure** | Valid JSON per line | Stream read | Skip line, log error |
-| **Schema** | Field types, required fields | Pydantic model | Move to DLQ |
-| **Business Rules** | Event type enums, references | Pydantic validators | Move to DLQ |
+| **File Header** | Gzip validity | Process start | Move to invalid-files/ |
+| **JSON Structure** | Valid JSON per line | Pandas read_json | Skip line, log error |
+| **Dtype Validation** | Field types, coercion | Pandas astype() | Set to NaN, count error |
+| **Value Validation** | Event type enums, required fields | Pandas isin(), isnull() | Filter out invalid |
+| **Business Rules** | References, timestamps | Custom validators | Log to Cloud Logging |
 
 ---
 
@@ -276,33 +356,91 @@ class ProcessedGitHubEvent(BaseModel):
 │   └─────────────────────────────────────────────────────────────────────────────────────────────────────┘   │
 │                                                             │                                             │
 │                                                             ▼                                             │
-│   Layer 2: Line-Level Validation (Stream Processing)                                                         │
+│   Layer 2: Pandas JSON Parsing (Chunked)                                                                   │
 │   ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐   │
-│   │ • Valid JSON per line                                                                               │   │
-│   │ • Line contains all required fields (id, type, created_at, actor, repo)                            │   │
+│   │ • Read file in chunks (default: 100,000 records)                                                    │   │
+│   │ • Parse JSON lines using pd.read_json(chunksize=N)                                                  │   │
+│   │ • Invalid JSON lines → set to NaN, skip                                                            │   │
 │   │                                                                                                      │   │
+│   │ • Memory: ~500MB per chunk vs 4GB for full load                                                      │   │
 │   │ FAIL → Skip line, count error, continue processing                                                   │   │
 │   └─────────────────────────────────────────────────────────────────────────────────────────────────────┘   │
 │                                                             │                                             │
 │                                                             ▼                                             │
-│   Layer 3: Schema Validation (Pydantic)                                                                     │
+│   Layer 3: Dtype Validation (Vectorized)                                                                  │
 │   ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐   │
-│   │ • Field type validation                                                                             │   │
-│   │ • Event type enum validation                                                                        │   │
-│   │ • Timestamp format validation                                                                       │   │
-│   │ • Nested object validation                                                                          │   │
+│   │ • Coerce columns to expected dtypes                                                                 │   │
+│   │ • id, type → string                                                                                │   │
+│   │ • public → boolean                                                                                 │   │
+│   │ • created_at → string (preserve ISO format)                                                         │   │
 │   │                                                                                                      │   │
-│   │ FAIL → Move event to DLQ, continue processing                                                        │   │
+│   │ FAIL → Set to NaN, count error, continue processing                                                  │   │
 │   └─────────────────────────────────────────────────────────────────────────────────────────────────────┘   │
 │                                                             │                                             │
 │                                                             ▼                                             │
-│   Layer 4: Business Rule Validation                                                                      │
+│   Layer 4: Value Validation (Vectorized)                                                                  │
 │   ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐   │
-│   │ • Actor IDs exist in actors dimension (if doing dimension lookup)                                   │   │
-│   │ • Repo IDs exist in repos dimension                                                                 │   │
+│   │ • Required fields check (vectorized isnull())                                                       │   │
+│   │ • Event type validation (vectorized isin())                                                         │   │
+│   │ • Nested field extraction (actor.id, repo.name)                                                     │   │
+│   │                                                                                                      │   │
+│   │ FAIL → Filter out invalid rows, log warning                                                         │   │
+│   └─────────────────────────────────────────────────────────────────────────────────────────────────────┘   │
+│                                                             │                                             │
+│                                                             ▼                                             │
+│   Layer 5: Business Rule Validation                                                                      │
+│   ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐   │
+│   │ • Timestamp sanity check (not future dates)                                                         │   │
+│   │ • Actor IDs, Repo IDs > 0                                                                           │   │
 │   │ • Referenced entities are valid                                                                     │   │
 │   │                                                                                                      │   │
-│   │ FAIL → Move event to DLQ, continue processing                                                        │   │
+│   │ FAIL → Filter out invalid rows, log warning                                                         │   │
+│   └─────────────────────────────────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                                             │
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Chunked Processing Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                              CHUNKED PROCESSING WITH PANDAS                                                 │
+├─────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                                             │
+│   Input File (600MB, ~1M records)                                                                          │
+│   ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐   │
+│   │ gs://landing/raw/2025-03-05-14.json.gz                                                             │   │
+│   └─────────────────────────────────────────────────────────────────────────────────────────────────────┘   │
+│                                    │                                                                      │
+│                                    ▼                                                                      │
+│   Create Chunk Iterator                                                                                 │
+│   ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐   │
+│   │ pd.read_json(file_path, lines=True, chunksize=100_000)                                           │   │
+│   │                                                                                                     │   │
+│   │ Creates: 10 chunks of 100K records each                                                            │   │
+│   └─────────────────────────────────────────────────────────────────────────────────────────────────────┘   │
+│                                    │                                                                      │
+│                                    ▼                                                                      │
+│   Process Each Chunk (One at a time)                                                                     │
+│   ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐   │
+│   │                                                                                                      │   │
+│   │   ┌─────────┐     ┌─────────┐     ┌─────────┐     ┌─────────┐     ┌─────────┐                       │   │
+│   │   │ Chunk 1 │ ───▶│ Chunk 2 │ ───▶│ Chunk 3 │ ───▶│  ...    │ ───▶│Chunk 10 │                       │   │
+│   │   └─────────┘     └─────────┘     └─────────┘     └─────────┘     └─────────┘                       │   │
+│   │      │              │              │              │              │                                │   │
+│   │      ▼              ▼              ▼              ▼              ▼                                │   │
+│   │   Validate      Validate       Validate       Validate       Validate                             │   │
+│   │   Transform     Transform      Transform      Transform      Transform                             │   │
+│   │   Write         Write          Write          Write          Write                                 │   │
+│   │   Discard       Discard        Discard        Discard        Discard                               │   │
+│   │                                                                                                      │   │
+│   │   Peak Memory: ~500MB per chunk (not 4GB!)                                                          │   │
+│   └─────────────────────────────────────────────────────────────────────────────────────────────────────┘   │
+│                                    │                                                                      │
+│                                    ▼                                                                      │
+│   Output: Aggregated NDJSON.gz                                                                           │
+│   ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐   │
+│   │ gs://staging/processed/2025-03-05-14.ndjson.gz                                                     │   │
 │   └─────────────────────────────────────────────────────────────────────────────────────────────────────┘   │
 │                                                                                                             │
 └─────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -310,12 +448,16 @@ class ProcessedGitHubEvent(BaseModel):
 
 ### Error Handling Strategy
 
-| Error Type | Action | Destination |
-|------------|--------|-------------|
-| **Corrupted file** | Move entire file | `gs://.../invalid-files/` |
-| **Invalid JSON lines** | Skip line, log | Error counter |
-| **Schema violations** | Move event to DLQ | `gs://.../dlq/events/` |
-| **Processing errors** | Retry (3x) then DLQ | Pub/Sub DLQ topic |
+| Error Type | Action | Logging |
+|------------|--------|---------|
+| **Corrupted file** | Move entire file | ERROR level to Cloud Logging |
+| **Invalid JSON lines** | Skip line, continue | WARN level + counter |
+| **Schema violations** | Skip record, continue | WARN level + counter |
+| **Business rule violations** | Skip record, continue | WARN level + counter |
+| **High error rate** (>10%) | Abort processing | CRITICAL + monitoring alert |
+| **Processing errors** | Log, continue | ERROR level |
+
+**No DLQ or retry mechanism** - errors are logged to Cloud Logging with monitoring alerts for critical issues.
 
 ---
 
@@ -423,22 +565,13 @@ gs://{project}-{env}-github-archive-landing/
 │   ├── chunks/                   # Large file chunks (split)
 │   │   └── {YYYY-MM-DD-HH}-chunk-{NNN}.json.gz
 │   │
-│   ├── invalid-files/            # Files that failed validation
-│   │   └── {YYYY-MM-DD-HH}.json.gz
-│   │
-│   └── processed/                # Successfully processed (marked)
-│       └── {YYYY-MM-DD-HH}.processed
+│   └── invalid-files/            # Files that failed validation
+│       └── {YYYY-MM-DD-HH}.json.gz
 
 gs://{project}-{env}-github-archive-staging/    # OUTPUT: Ready for BigQuery
-├── github-archive/
-│   └── processed/
-│       └── {YYYY-MM-DD-HH}.ndjson.gz
-
-gs://{project}-{env}-github-archive-dlq/        # Dead Letter Queue
-├── events/
-│   └── {YYYY-MM-DD-HH}-{event-id}.json
-└── failures/
-    └── {timestamp}-failure.json
+└── github-archive/
+    └── processed/
+        └── {YYYY-MM-DD-HH}.ndjson.gz
 ```
 
 ---
@@ -451,8 +584,9 @@ gs://{project}-{env}-github-archive-dlq/        # Dead Letter Queue
 | **github-archive-processor** | Cloud Run Service | Main file processor | 0-100 instances |
 | **file-splitter** | Cloud Run Job | Splits large files | Manual concurrency |
 | **chunk-processor** | Cloud Run Task | Processes chunks | Inherits from service |
-| **Pub/Sub DLQ** | Topic | Failed event handling | N/A |
-| **Firestore** | Database | Chunk tracking | N/A |
+| **Pub/Sub Topic** | Messaging | Chunk events for large files | N/A |
+| **BigQuery** | Data Warehouse | Loads each chunk as finalized | N/A |
+| **Cloud Logging** | Monitoring | Error logging and metrics | N/A |
 
 ---
 
@@ -478,19 +612,19 @@ phase2_process_files/
 │           ├── main.py                             # Cloud Run Service entry
 │           ├── schemas/
 │           │   ├── __init__.py
-│           │   ├── github_event_schema.py          # Pydantic models
-│           │   ├── field_definitions.py            # Type mappings
+│           │   ├── dtype_definitions.py            # Pandas dtype mappings
 │           │   └── validation_rules.py             # Validators
 │           ├── processors/
 │           │   ├── __init__.py
 │           │   ├── file_processor.py               # Main processing logic
-│           │   ├── chunk_processor.py              # Chunk handling
+│           │   ├── chunked_processor.py            # Pandas chunked processing
 │           │   ├── file_splitter.py                # Large file splitting
 │           │   └── transformer.py                  # JSON flattening
 │           ├── validators/
 │           │   ├── __init__.py
 │           │   ├── file_validator.py               # File-level validation
-│           │   ├── schema_validator.py             # Schema validation
+│           │   ├── dtype_validator.py              # Dtype validation
+│           │   ├── value_validator.py              # Value validation
 │           │   └── business_validator.py          # Business rules
 │           ├── writers/
 │           │   ├── __init__.py
@@ -499,7 +633,8 @@ phase2_process_files/
 │           │   ├── __init__.py
 │           │   ├── gcs_client.py                   # GCS utilities
 │           │   ├── pubsub_client.py                # Pub/Sub utilities
-│           │   └── firestore_client.py             # Firestore utilities
+│           │   ├── bigquery_client.py              # BigQuery load trigger
+│           │   └── logger.py                       # Cloud Logging utilities
 │           ├── config.py                           # Configuration
 │           ├── requirements.txt
 │           └── Dockerfile
@@ -508,7 +643,7 @@ phase2_process_files/
 │   └── github_archive/
 │       └── phase2_process_files/
 │           ├── __init__.py
-│           ├── test_schemas.py
+│           ├── test_dtype_definitions.py
 │           ├── test_processors.py
 │           ├── test_validators.py
 │           ├── test_transformers.py
@@ -525,9 +660,10 @@ phase2_process_files/
         │   ├── eventarc.tf                    # Eventarc trigger
         │   ├── cloud_run_service.tf           # Processor service
         │   ├── cloud_run_job_splitter.tf      # File splitter job
-        │   ├── pubsub.tf                      # DLQ topic
-        │   ├── firestore.tf                   # Chunk tracking
-        │   ├── storage.tf                     # Staging/DLQ buckets
+        │   ├── pubsub.tf                      # Chunk events topic
+        │   ├── bigquery.tf                    # BigQuery dataset & table
+        │   ├── storage.tf                     # Staging bucket
+        │   ├── monitoring.tf                  # Cloud Logging & Monitoring alerts
         │   ├── service_accounts.tf
         │   └── locals.tf
         ├── scripts/
@@ -541,10 +677,11 @@ phase2_process_files/
 
 ## Next Steps
 
-1. **Create schema definitions** - Pydantic models for GitHub events
+1. **Create dtype definitions** - Pandas dtype mappings for GitHub events
 2. **Create Eventarc trigger** - Terraform configuration
 3. **Build processor service** - Cloud Run service with autoscaling
 4. **Build file splitter** - Cloud Run job for large files
-5. **Create validation layers** - File, schema, and business validators
-6. **Create output writer** - NDJSON writer with compression
-7. **Deploy and test** - End-to-end testing with sample files
+5. **Create validation layers** - File, dtype, and value validators
+6. **Create chunked processor** - Pandas chunked processing with memory control
+7. **Create output writer** - NDJSON writer with compression
+8. **Deploy and test** - End-to-end testing with sample files
