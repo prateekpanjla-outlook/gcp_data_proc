@@ -39,3 +39,19 @@ resource "google_service_account" "scheduler" {
 # Note: The scheduler service account only needs roles/run.invoker on the
 # specific Cloud Run Jobs it invokes (granted in scheduler.tf).
 # No project-level Cloud Scheduler roles are needed on the SA itself.
+
+# ==============================================================================
+# Cloud Scheduler Service Agent IAM
+# ==============================================================================
+# Get project number for Cloud Scheduler service agent reference
+data "google_project" "current" {
+  project_id = var.project_id
+}
+
+# Allows Cloud Scheduler service agent to generate OAuth/OIDC tokens for scheduler SA
+# Required for HTTP targets with authentication (Cloud Run Jobs API)
+resource "google_service_account_iam_member" "scheduler_token_creator" {
+  service_account_id = google_service_account.scheduler.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
+}

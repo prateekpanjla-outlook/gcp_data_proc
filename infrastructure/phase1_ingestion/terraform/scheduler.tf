@@ -15,14 +15,17 @@ resource "google_cloud_scheduler_job" "github_archive_download" {
     http_method = "POST"
     uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${var.project_id}/jobs/${local.github_archive.job_name}:run"
 
-    oidc_token {
+    # Use OAuth (not OIDC) for Cloud Run Jobs API
+    # The Jobs API endpoint (*.googleapis.com) requires OAuth tokens
+    # OIDC tokens are for Cloud Run services (*.a.run.app) or external endpoints
+    oauth_token {
       service_account_email = google_service_account.scheduler.email
     }
   }
 
   retry_config {
     retry_count = 2
-    min_backoff = "10s"
+    min_backoff_duration = "10s"
   }
 
   depends_on = [
@@ -36,7 +39,7 @@ resource "google_cloud_scheduler_job" "github_archive_download" {
 resource "google_cloud_run_v2_job_iam_member" "scheduler_github_invoker" {
   project  = var.project_id
   location = var.region
-  job_name = google_cloud_run_v2_job.github_archive_downloader.name
+  name     = google_cloud_run_v2_job.github_archive_downloader.name
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.scheduler.email}"
 }

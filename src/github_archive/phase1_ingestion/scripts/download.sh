@@ -162,14 +162,15 @@ if [[ "${ENVIRONMENT}" == "local" ]]; then
     log_error "curl failed with exit code: ${EXIT_CODE}"
   fi
 else
-  # GCS mode: Use gsutil for streaming download
-  log_info "Using gsutil for GCS download"
+  # GCS mode: Download via curl to temp, then stream to GCS
+  log_info "Using curl + gsutil for GCS download"
 
-  if gsutil cp "${SOURCE_URL}" "${TARGET_PATH}"; then
+  # Use pipe to stream directly (memory-efficient)
+  if curl -fsSL "${SOURCE_URL}" | gsutil cp - "${TARGET_PATH}"; then
     DOWNLOAD_SUCCESS=true
   else
     EXIT_CODE=$?
-    log_error "gsutil cp failed with exit code: ${EXIT_CODE}"
+    log_error "curl + gsutil cp failed with exit code: ${EXIT_CODE}"
   fi
 fi
 

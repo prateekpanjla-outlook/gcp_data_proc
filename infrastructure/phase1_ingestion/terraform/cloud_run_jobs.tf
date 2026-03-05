@@ -32,20 +32,21 @@ resource "google_cloud_run_v2_job" "github_archive_downloader" {
           value = "1"
         }
 
-        # Resource limits (minimal - gsutil uses streaming)
+        # Resource limits (gsutil uses streaming)
+        # Cloud Run v2 requires min 512Mi when CPU is allocated
         resources {
           limits = {
             cpu    = "1"
-            memory = "256Mi"
+            memory = "512Mi"
           }
         }
       }
 
       # Service account
-      service_account_name = google_service_account.github_archive_downloader.email
+      service_account = google_service_account.github_archive_downloader.email
 
       # Timeout (30 minutes - ample for gsutil download)
-      timeout_seconds = 1800
+      timeout = "1800s"
     }
   }
 
