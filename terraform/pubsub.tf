@@ -4,18 +4,18 @@
 resource "google_pubsub_topic" "pipeline_dlq" {
   name = "pipeline-dlq"
 
-  message_retention_duration = "604800s"  # 7 days
+  message_retention_duration = "604800s" # 7 days
 
   labels = {
-    purpose     = "dead-letter-queue"
-    managed-by  = "terraform"
+    purpose    = "dead-letter-queue"
+    managed-by = "terraform"
   }
 }
 
 # DLQ Subscription
 resource "google_pubsub_subscription" "pipeline_dlq_sub" {
-  name    = "pipeline-dlq-sub"
-  topic   = google_pubsub_topic.pipeline_dlq.id
+  name  = "pipeline-dlq-sub"
+  topic = google_pubsub_topic.pipeline_dlq.id
 
   # Only deliver messages once (at-least-once)
   acknowledge_deadline = "600s"
@@ -36,8 +36,8 @@ resource "google_pubsub_subscription" "pipeline_dlq_sub" {
   filter = "NOT attributes.retry_count >= attributes.max_retries"
 
   labels = {
-    purpose     = "dlq-retry"
-    managed-by  = "terraform"
+    purpose    = "dlq-retry"
+    managed-by = "terraform"
   }
 
   depends_on = [
@@ -49,11 +49,11 @@ resource "google_pubsub_subscription" "pipeline_dlq_sub" {
 resource "google_pubsub_topic" "permanent_failures" {
   name = "pipeline-permanent-failures"
 
-  message_retention_duration = "2592000s"  # 30 days
+  message_retention_duration = "2592000s" # 30 days
 
   labels = {
-    purpose     = "permanent-failures"
-    managed-by  = "terraform"
+    purpose    = "permanent-failures"
+    managed-by = "terraform"
   }
 }
 
@@ -73,8 +73,8 @@ resource "google_pubsub_subscription" "permanent_failures_sub" {
   # }
 
   labels = {
-    purpose     = "monitoring"
-    managed-by  = "terraform"
+    purpose    = "monitoring"
+    managed-by = "terraform"
   }
 }
 

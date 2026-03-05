@@ -20,21 +20,21 @@ resource "google_monitoring_alert_policy" "high_failure_rate" {
   display_name = "Pipeline High Failure Rate"
   enabled      = var.alerts_enabled
 
-  combiner     = "OR"
+  combiner = "OR"
   conditions {
     display_name = "GitHub Archive Job High Failure Rate"
 
     condition_threshold {
-      filter          = "resource.type = \"cloud_run_job\" AND metric.type = \"run.googleapis.com/job_failed_count\""
+      filter = "resource.type = \"cloud_run_job\" AND metric.type = \"run.googleapis.com/job_failed_count\""
       aggregations {
-        alignment_period     = 300  # 5 minutes
+        alignment_period     = 300 # 5 minutes
         per_series_aligner   = "ALIGN_RATE"
         cross_series_reducer = "REDUCE_SUM"
         group_by_fields      = ["resource.label.job_name"]
       }
 
       comparison      = "COMPARISON_GT"
-      threshold_value = 10  # More than 10 failed tasks in 5 minutes
+      threshold_value = 10 # More than 10 failed tasks in 5 minutes
       duration        = "300s"
 
       trigger {
@@ -44,9 +44,9 @@ resource "google_monitoring_alert_policy" "high_failure_rate" {
   }
 
   documentation {
-    title       = "High failure rate detected in Cloud Run Jobs"
-    content     = "More than 10 tasks have failed in the last 5 minutes. Check logs for details."
-    mime_type   = "text/markdown"
+    title     = "High failure rate detected in Cloud Run Jobs"
+    content   = "More than 10 tasks have failed in the last 5 minutes. Check logs for details."
+    mime_type = "text/markdown"
   }
 
   notification_channels = [
@@ -63,7 +63,7 @@ resource "google_monitoring_alert_policy" "dlq_backlog" {
   display_name = "Dead Letter Queue Backlog"
   enabled      = var.alerts_enabled
 
-  combiner     = "OR"
+  combiner = "OR"
   conditions {
     display_name = "DLQ Topic High Message Count"
 
@@ -78,7 +78,7 @@ resource "google_monitoring_alert_policy" "dlq_backlog" {
       }
 
       comparison      = "COMPARISON_GT"
-      threshold_value = 100  # More than 100 messages in DLQ
+      threshold_value = 100 # More than 100 messages in DLQ
       duration        = "300s"
 
       trigger {
@@ -88,9 +88,9 @@ resource "google_monitoring_alert_policy" "dlq_backlog" {
   }
 
   documentation {
-    title       = "Dead Letter Queue Backlog Alert"
-    content     = "The DLQ has more than 100 messages waiting to be processed. This may indicate a systemic issue."
-    mime_type   = "text/markdown"
+    title     = "Dead Letter Queue Backlog Alert"
+    content   = "The DLQ has more than 100 messages waiting to be processed. This may indicate a systemic issue."
+    mime_type = "text/markdown"
   }
 
   notification_channels = [
@@ -107,7 +107,7 @@ resource "google_monitoring_alert_policy" "bigquery_load_errors" {
   display_name = "BigQuery Load Errors"
   enabled      = var.alerts_enabled
 
-  combiner     = "OR"
+  combiner = "OR"
   conditions {
     display_name = "High BigQuery Load Error Rate"
 
@@ -121,7 +121,7 @@ resource "google_monitoring_alert_policy" "bigquery_load_errors" {
       }
 
       comparison      = "COMPARISON_GT"
-      threshold_value = 0.1  # More than 10% error rate
+      threshold_value = 0.1 # More than 10% error rate
       duration        = "300s"
 
       trigger {
@@ -131,9 +131,9 @@ resource "google_monitoring_alert_policy" "bigquery_load_errors" {
   }
 
   documentation {
-    title       = "BigQuery Load Error Rate Alert"
-    content     = "More than 10% of BigQuery load jobs are failing. Check job details and schema."
-    mime_type   = "text/markdown"
+    title     = "BigQuery Load Error Rate Alert"
+    content   = "More than 10% of BigQuery load jobs are failing. Check job details and schema."
+    mime_type = "text/markdown"
   }
 
   notification_channels = [
@@ -204,13 +204,13 @@ resource "google_monitoring_dashboard" "pipeline_dashboard" {
 
   grid_layout {
     widgets {
-      title      = "Jobs Status"
+      title = "Jobs Status"
       xy_chart {
         data_sets {
           time_series_query {
-            unit        = "1"
+            unit = "1"
             time_series {
-              filter     = "resource.type = \"cloud_run_job\""
+              filter = "resource.type = \"cloud_run_job\""
               aggregation {
                 alignment_period     = 300
                 per_series_aligner   = "ALIGN_RATE"
@@ -225,16 +225,16 @@ resource "google_monitoring_dashboard" "pipeline_dashboard" {
     }
 
     widgets {
-      title      = "DLQ Message Count"
+      title = "DLQ Message Count"
       xy_chart {
         data_sets {
           time_series_query {
-            unit        = "1"
+            unit = "1"
             time_series {
-              filter     = "resource.type = \"pubsub_topic\" AND metric.type = \"pubsub.googleapis.com/topic/num_messages_published\" AND resource.label.topic_id = \"pipeline-dlq\""
+              filter = "resource.type = \"pubsub_topic\" AND metric.type = \"pubsub.googleapis.com/topic/num_messages_published\" AND resource.label.topic_id = \"pipeline-dlq\""
               aggregation {
-                alignment_period     = 60
-                per_series_aligner   = "ALIGN_SUM"
+                alignment_period   = 60
+                per_series_aligner = "ALIGN_SUM"
               }
             }
           }
@@ -244,16 +244,16 @@ resource "google_monitoring_dashboard" "pipeline_dashboard" {
     }
 
     widgets {
-      title      = "BigQuery Load Job Status"
+      title = "BigQuery Load Job Status"
       xy_chart {
         data_sets {
           time_series_query {
-            unit        = "1"
+            unit = "1"
             time_series {
-              filter     = "resource.type = \"bigquery_project\" AND metric.type = \"bigquery.googleapis.com/job/loaded_count\""
+              filter = "resource.type = \"bigquery_project\" AND metric.type = \"bigquery.googleapis.com/job/loaded_count\""
               aggregation {
-                alignment_period     = 300
-                per_series_aligner   = "ALIGN_DELTA"
+                alignment_period   = 300
+                per_series_aligner = "ALIGN_DELTA"
               }
             }
           }
@@ -263,13 +263,13 @@ resource "google_monitoring_dashboard" "pipeline_dashboard" {
     }
 
     widgets {
-      title      = "Processing Time"
+      title = "Processing Time"
       xy_chart {
         data_sets {
           time_series_query {
-            unit        = "ms"
+            unit = "ms"
             time_series {
-              filter     = "metric.type = \"custom.googleapis.com/pipeline/processing_time_ms\""
+              filter = "metric.type = \"custom.googleapis.com/pipeline/processing_time_ms\""
               aggregation {
                 alignment_period     = 300
                 per_series_aligner   = "ALIGN_MEAN"

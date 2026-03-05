@@ -43,7 +43,7 @@ resource "google_storage_bucket" "github_archive_landing" {
 
   lifecycle_rule {
     condition {
-      age = 90  # Delete files after 90 days
+      age = 90 # Delete files after 90 days
     }
     action {
       type = "Delete"
@@ -122,7 +122,7 @@ resource "google_bigquery_dataset" "github" {
     managed_by  = "terraform"
   }
 
-  default_table_expiration_ms = 7776000000  # 90 days
+  default_table_expiration_ms = 7776000000 # 90 days
 
   delete_contents_on_destroy = var.environment == "dev" ? true : false
 }
@@ -139,7 +139,7 @@ resource "google_bigquery_dataset" "hacker_news" {
     managed_by  = "terraform"
   }
 
-  default_table_expiration_ms = 7776000000  # 90 days
+  default_table_expiration_ms = 7776000000 # 90 days
 
   delete_contents_on_destroy = var.environment == "dev" ? true : false
 }
@@ -165,9 +165,9 @@ resource "google_artifact_registry_repository" "containers" {
 
 # GitHub Archive Processor
 resource "google_cloud_run_v2_service" "github_processor" {
-  name     = "${var.github_service_name}-${var.environment}"
-  project  = var.project_id
-  location = var.region
+  name        = "${var.github_service_name}-${var.environment}"
+  project     = var.project_id
+  location    = var.region
   description = "Process GitHub Archive data from GCS to BigQuery"
 
   template {
@@ -211,7 +211,7 @@ resource "google_cloud_run_v2_service" "github_processor" {
     service_account = google_service_account.processor.email
 
     # Timeout for processing
-    timeout_seconds = 3600  # 1 hour
+    timeout_seconds = 3600 # 1 hour
 
     # Container startup CPU boost
     scaling {
@@ -226,7 +226,7 @@ resource "google_cloud_run_v2_service" "github_processor" {
   }
 
   traffic {
-    percent = 100
+    percent         = 100
     latest_revision = true
   }
 
@@ -238,9 +238,9 @@ resource "google_cloud_run_v2_service" "github_processor" {
 
 # Hacker News Processor
 resource "google_cloud_run_v2_service" "hn_processor" {
-  name     = "${var.hn_service_name}-${var.environment}"
-  project  = var.project_id
-  location = var.region
+  name        = "${var.hn_service_name}-${var.environment}"
+  project     = var.project_id
+  location    = var.region
   description = "Fetch and process Hacker News data to BigQuery"
 
   template {
@@ -292,7 +292,7 @@ resource "google_cloud_run_v2_service" "hn_processor" {
   }
 
   traffic {
-    percent = 100
+    percent         = 100
     latest_revision = true
   }
 
@@ -325,9 +325,9 @@ resource "google_cloud_run_v2_service_iam_member" "hn_invoker" {
 # Eventarc Triggers (for automatic invocation)
 # ==============================================================================
 resource "google_eventarc_trigger" "github_storage" {
-  count   = var.eventarc_enabled ? 1 : 0
-  name    = "github-storage-trigger-${var.environment}"
-  project = var.project_id
+  count    = var.eventarc_enabled ? 1 : 0
+  name     = "github-storage-trigger-${var.environment}"
+  project  = var.project_id
   location = var.region
 
   matching_criteria {
@@ -369,7 +369,7 @@ resource "google_cloud_scheduler_job" "hn_fetch" {
   name     = "hn-fetch-${var.environment}"
   project  = var.project_id
   region   = var.region
-  schedule = "0 * * * *"  # Every hour
+  schedule = "0 * * * *" # Every hour
 
   http_target {
     http_method = "GET"
@@ -386,9 +386,9 @@ resource "google_cloud_scheduler_job" "hn_fetch" {
 }
 
 resource "google_eventarc_trigger" "hn_scheduler" {
-  count   = var.eventarc_enabled ? 1 : 0
-  name    = "hn-scheduler-trigger-${var.environment}"
-  project = var.project_id
+  count    = var.eventarc_enabled ? 1 : 0
+  name     = "hn-scheduler-trigger-${var.environment}"
+  project  = var.project_id
   location = var.region
 
   matching_criteria {

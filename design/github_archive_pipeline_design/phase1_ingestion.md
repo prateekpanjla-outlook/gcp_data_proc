@@ -92,6 +92,66 @@ gcloud iam service-accounts create ${ENVIRONMENT}-github-archive-downloader \
 | `roles/run.developer` on the project | Required to deploy Cloud Run Jobs |
 | `roles/cloudbuild.builds.builder` | Required to build container images (if using Cloud Build) |
 
+**Cloud Scheduler Service Account Permissions:**
+
+The `${ENVIRONMENT}-scheduler` service account requires specific permissions to invoke Cloud Run Jobs:
+
+| Permission | Target | Purpose |
+|------------|--------|---------|
+| `roles/run.invoker` | Cloud Run Job: `${ENVIRONMENT}-github-archive-download-gsutil` | Allows scheduler to execute the download job |
+
+**Permission Chain Flow:**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    CLOUD SCHEDULER PERMISSION CHAIN                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   1. Cloud Scheduler Job (${ENVIRONMENT}-github-archive-download-job)       │
+│      ├─ Schedule: "30 * * * *" (every hour at 30 min past)                 │
+│      ├─ Uses: OIDC token with ${ENVIRONMENT}-scheduler SA email            │
+│      └─ Target: Cloud Run Job (:run endpoint)                               │
+│                             ↓                                               │
+│   2. Scheduler Service Account (${ENVIRONMENT}-scheduler)                   │
+│      ├─ Requires: roles/run.invoker ON the Cloud Run Job                   │
+│      └─ Granted by: google_cloud_run_v2_job_iam_member resource            │
+│                             ↓                                               │
+│   3. Cloud Run Job (${ENVIRONMENT}-github-archive-download-gsutil)          │
+│      └─ Runs as: ${ENVIRONMENT}-github-archive-downloader SA                │
+│          ├─ roles/storage.objectUser (for gsutil upload)                   │
+│          └─ roles/logging.logWriter (for Cloud Logging)                    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Terraform Configuration (scheduler.tf):**
+
+```hcl
+# Scheduler Job with OIDC authentication
+resource "google_cloud_scheduler_job" "github_archive_download" {
+  name        = "${local.env_prefix}-github-archive-download-job"
+  schedule    = "30 * * * *"
+  http_target {
+    http_method = "POST"
+    uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${var.project_id}/jobs/${local.env_prefix}-github-archive-download-gsutil:run"
+    oidc_token {
+      service_account_email = google_service_account.scheduler.email
+    }
+  }
+}
+
+# IAM binding: Grant scheduler permission to invoke the job
+resource "google_cloud_run_v2_job_iam_member" "scheduler_github_download_invoker" {
+  project  = var.project_id
+  location = var.region
+  job_name = google_cloud_run_v2_job.github_archive_downloader.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.scheduler.email}"
+}
+```
+
+**Source:** [Google Cloud Documentation - Execute Cloud Run jobs on a schedule](https://cloud.google.com/run/docs/execute/jobs-on-schedule)
+
 **Storage Bucket Creation:**
 
 ```bash
@@ -537,14 +597,16 @@ variable "environment" {
 
 ```hcl
 locals {
-  # Resource name prefixes
-  name_prefix = "${var.environment}-github-archive"
+  # Environment prefix for resource naming
+  env_prefix = var.environment
 
-  # Full resource names
-  service_account_id = "${local.name_prefix}-downloader"
-  bucket_name         = "${var.project_id}-${local.name_prefix}-landing"
-  job_name            = "${local.name_prefix}-download-gsutil"
-  scheduler_name      = "${local.name_prefix}-download-job"
+  # GitHub Archive Ingestion Resource Names
+  github_archive = {
+    service_account_id = "${local.env_prefix}-github-archive-downloader"
+    bucket_name         = "${var.project_id}-${local.env_prefix}-github-archive-landing"
+    job_name            = "${local.env_prefix}-github-archive-download-gsutil"
+    scheduler_name      = "${local.env_prefix}-github-archive-download-job"
+  }
 }
 ```
 
@@ -554,9 +616,15 @@ locals {
 
 ```hcl
 resource "google_service_account" "github_archive_downloader" {
-  account_id   = local.service_account_id
+  account_id   = local.github_archive.service_account_id
   display_name = "${title(var.environment)} GitHub Archive Downloader"
-  description  = "Service account for Cloud Run Job that downloads GitHub Archive files"
+  description  = "Service account for Cloud Run Job that downloads GitHub Archive files using gsutil"
+}
+
+resource "google_service_account" "scheduler" {
+  account_id   = "${local.env_prefix}-scheduler"
+  display_name = "${title(var.environment)} Cloud Scheduler Service Account"
+  description  = "Service account for Cloud Scheduler jobs"
 }
 
 resource "google_project_iam_member" "github_archive_downloader_storage" {
@@ -578,7 +646,7 @@ resource "google_project_iam_member" "github_archive_downloader_logging" {
 
 ```hcl
 resource "google_cloud_run_v2_job" "github_archive_downloader" {
-  name     = local.job_name
+  name     = local.github_archive.job_name
   location = var.region
   project  = var.project_id
 
@@ -625,14 +693,16 @@ resource "google_cloud_run_v2_job" "github_archive_downloader" {
 **File:** [`terraform/scheduler.tf`](../../terraform/scheduler.tf)
 
 ```hcl
-resource "google_cloud_scheduler_job" "github_archive_downloader" {
-  name        = local.scheduler_name
+resource "google_cloud_scheduler_job" "github_archive_download" {
+  name        = local.github_archive.scheduler_name
+  description = "Downloads hourly GitHub Archive files using gsutil-based Cloud Run Job"
+
   schedule    = "30 * * * *"  # 30 minutes past each hour
   time_zone   = "UTC"
 
   http_target {
     http_method = "POST"
-    uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${var.project_id}/jobs/${local.job_name}:run"
+    uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${var.project_id}/jobs/${local.github_archive.job_name}:run"
 
     oidc_token {
       service_account_email = google_service_account.scheduler.email
@@ -644,6 +714,15 @@ resource "google_cloud_scheduler_job" "github_archive_downloader" {
     min_backoff = "10s"
   }
 }
+
+# IAM binding: Grant scheduler permission to invoke the job
+resource "google_cloud_run_v2_job_iam_member" "scheduler_github_download_invoker" {
+  project  = var.project_id
+  location = var.region
+  job_name = google_cloud_run_v2_job.github_archive_downloader.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.scheduler.email}"
+}
 ```
 
 ### Storage Bucket
@@ -652,10 +731,12 @@ resource "google_cloud_scheduler_job" "github_archive_downloader" {
 
 ```hcl
 resource "google_storage_bucket" "github_archive_landing" {
-  name          = local.bucket_name
+  name          = local.github_archive.bucket_name
   location      = var.region
-  force_destroy = false
-  uniform_level_access = true
+  project       = var.project_id
+  force_destroy = var.environment == "dev" ? true : false
+
+  uniform_bucket_level_access = true
 
   lifecycle_rule {
     condition {
@@ -664,6 +745,13 @@ resource "google_storage_bucket" "github_archive_landing" {
     action {
       type = "Delete"
     }
+  }
+
+  labels = {
+    environment = var.environment
+    source      = "github-archive"
+    layer       = "landing"
+    managed_by  = "terraform"
   }
 }
 ```

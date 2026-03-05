@@ -50,8 +50,8 @@ resource "google_service_account" "dlq_handler" {
 
 # Cloud Scheduler Service Account
 resource "google_service_account" "scheduler" {
-  account_id   = "sa-scheduler"
-  display_name = "Cloud Scheduler Service Account"
+  account_id   = "${local.env_prefix}-scheduler"
+  display_name = "${title(var.environment)} Cloud Scheduler Service Account"
   description  = "Service account for Cloud Scheduler jobs"
 }
 
@@ -176,12 +176,9 @@ resource "google_project_iam_member" "dlq_handler_logging" {
 # ==============================================================================
 # IAM Roles - Cloud Scheduler
 # ==============================================================================
-
-resource "google_project_iam_member" "scheduler_invoker" {
-  project = var.project_id
-  role    = "roles/cloudscheduler.invoker"
-  member  = "serviceAccount:${google_service_account.scheduler.email}"
-}
+# Note: The scheduler service account only needs roles/run.invoker on the
+# specific Cloud Run Jobs it invokes (granted per-job below).
+# No project-level Cloud Scheduler roles are needed on the SA itself.
 
 resource "google_cloud_run_v2_job_iam_member" "scheduler_github_invoker" {
   project  = var.project_id

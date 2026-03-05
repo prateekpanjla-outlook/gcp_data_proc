@@ -42,7 +42,7 @@ resource "google_cloud_run_v2_job" "github_archive_downloader" {
       service_account_name = google_service_account.github_archive_downloader.email
 
       # Timeout
-      timeout_seconds = 1800  # 30 minutes
+      timeout_seconds = 1800 # 30 minutes
     }
   }
 }
@@ -93,7 +93,7 @@ resource "google_cloud_run_v2_job" "github_archive_processor" {
       }
 
       # Timeout for job execution
-      timeout = "3600s"  # 1 hour
+      timeout = "3600s" # 1 hour
 
       # Service account
       service_account_name = google_service_account.github_processor.id
@@ -146,10 +146,10 @@ resource "google_cloud_run_v2_job" "hacker_news_fetcher" {
         }
       }
 
-      timeout = "600s"  # 10 minutes
+      timeout = "600s" # 10 minutes
 
       service_account_name = google_service_account.hn_fetcher.id
-      region                = var.region
+      region               = var.region
     }
   }
 }
@@ -193,10 +193,10 @@ resource "google_cloud_run_v2_job" "hacker_news_processor" {
         }
       }
 
-      timeout = "1800s"  # 30 minutes
+      timeout = "1800s" # 30 minutes
 
       service_account_name = google_service_account.hn_processor.id
-      region                = var.region
+      region               = var.region
     }
   }
 }
@@ -235,10 +235,10 @@ resource "google_cloud_run_v2_job" "dlq_processor" {
         }
       }
 
-      timeout = "300s"  # 5 minutes
+      timeout = "300s" # 5 minutes
 
       service_account_name = google_service_account.dlq_handler.id
-      region                = var.region
+      region               = var.region
     }
   }
 }

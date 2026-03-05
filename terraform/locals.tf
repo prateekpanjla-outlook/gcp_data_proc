@@ -22,7 +22,7 @@ locals {
 
   # GCS path prefixes
   gcs_paths = {
-    github_raw = "github-archive/raw"  # Landing zone for raw files
-    github_processed = "github-archive/processed"  # Processed data
+    github_raw       = "github-archive/raw"       # Landing zone for raw files
+    github_processed = "github-archive/processed" # Processed data
   }
 }

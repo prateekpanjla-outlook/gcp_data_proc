@@ -7,8 +7,8 @@ resource "google_cloud_scheduler_job" "github_archive_download" {
   name        = local.github_archive.scheduler_name
   description = "Downloads hourly GitHub Archive files using gsutil-based Cloud Run Job"
 
-  schedule    = "30 * * * *"  # Every hour at 30 minutes past
-  time_zone   = "UTC"
+  schedule  = "30 * * * *" # Every hour at 30 minutes past
+  time_zone = "UTC"
 
   http_target {
     http_method = "POST"
@@ -38,13 +38,13 @@ resource "google_cloud_run_v2_job_iam_member" "scheduler_github_download_invoker
 # GitHub Archive Processor - Hourly (Phase 2: ETL Processing)
 # ==============================================================================
 resource "google_cloud_scheduler_job" "github_archive_downloader" {
-  name             = "github-archive-downloader"
-  description      = "Processes downloaded GitHub Archive files"
+  name        = "github-archive-downloader"
+  description = "Processes downloaded GitHub Archive files"
 
-  schedule          = "30 * * * *"  # Every hour at 30 minutes past
-  time_zone         = "UTC"
+  schedule  = "30 * * * *" # Every hour at 30 minutes past
+  time_zone = "UTC"
 
-  attempt_deadline  = "600s"  # 10 minutes
+  attempt_deadline = "600s" # 10 minutes
 
   http_target {
     http_method = "POST"
@@ -72,13 +72,13 @@ resource "google_cloud_scheduler_job" "github_archive_downloader" {
 
 # Hacker News Poller - Every 5 minutes
 resource "google_cloud_scheduler_job" "hacker_news_poller" {
-  name             = "hacker-news-poller"
-  description      = "Polls Hacker News API for new stories"
+  name        = "hacker-news-poller"
+  description = "Polls Hacker News API for new stories"
 
-  schedule          = "*/5 * * * *"  # Every 5 minutes
-  time_zone         = "UTC"
+  schedule  = "*/5 * * * *" # Every 5 minutes
+  time_zone = "UTC"
 
-  attempt_deadline  = "300s"  # 5 minutes
+  attempt_deadline = "300s" # 5 minutes
 
   http_target {
     http_method = "POST"
@@ -89,7 +89,7 @@ resource "google_cloud_scheduler_job" "hacker_news_poller" {
     }
 
     body = base64encode(jsonencode({
-      fetch_stories = true,
+      fetch_stories  = true,
       fetch_comments = true,
     }))
   }
@@ -107,13 +107,13 @@ resource "google_cloud_scheduler_job" "hacker_news_poller" {
 
 # Hacker News User Profile Refresh - Daily
 resource "google_cloud_scheduler_job" "hacker_news_user_refresh" {
-  name             = "hacker-news-user-refresh"
-  description      = "Refreshes Hacker News user profiles"
+  name        = "hacker-news-user-refresh"
+  description = "Refreshes Hacker News user profiles"
 
-  schedule          = "0 2 * * *"  # Daily at 2 AM UTC
-  time_zone         = "UTC"
+  schedule  = "0 2 * * *" # Daily at 2 AM UTC
+  time_zone = "UTC"
 
-  attempt_deadline  = "3600s"  # 1 hour
+  attempt_deadline = "3600s" # 1 hour
 
   http_target {
     http_method = "POST"
@@ -136,13 +136,13 @@ resource "google_cloud_scheduler_job" "hacker_news_user_refresh" {
 
 # DLQ Processor - Every 10 minutes
 resource "google_cloud_scheduler_job" "dlq_processor" {
-  name             = "dlq-processor"
-  description      = "Processes dead letter queue messages"
+  name        = "dlq-processor"
+  description = "Processes dead letter queue messages"
 
-  schedule          = "*/10 * * * *"  # Every 10 minutes
-  time_zone         = "UTC"
+  schedule  = "*/10 * * * *" # Every 10 minutes
+  time_zone = "UTC"
 
-  attempt_deadline  = "600s"
+  attempt_deadline = "600s"
 
   http_target {
     http_method = "POST"
@@ -161,13 +161,13 @@ resource "google_cloud_scheduler_job" "dlq_processor" {
 
 # BigQuery Partition Cleanup - Weekly
 resource "google_cloud_scheduler_job" "partition_cleanup" {
-  name             = "partition-cleanup"
-  description      = "Cleans up old BigQuery partitions"
+  name        = "partition-cleanup"
+  description = "Cleans up old BigQuery partitions"
 
-  schedule          = "0 3 * * 0"  # Sunday at 3 AM UTC
-  time_zone         = "UTC"
+  schedule  = "0 3 * * 0" # Sunday at 3 AM UTC
+  time_zone = "UTC"
 
-  attempt_deadline  = "3600s"
+  attempt_deadline = "3600s"
 
   http_target {
     http_method = "POST"
@@ -178,7 +178,7 @@ resource "google_cloud_scheduler_job" "partition_cleanup" {
     }
 
     body = base64encode(jsonencode({
-      task = "cleanup_partitions",
+      task           = "cleanup_partitions",
       retention_days = 400,
     }))
   }

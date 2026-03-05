@@ -42,7 +42,7 @@ resource "local_file" "start_emulators" {
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$${BASH_SOURCE[0]}")" && pwd)"
 
 echo "========================================="
 echo "Starting Local Development Emulators"
@@ -172,7 +172,7 @@ echo "  Pub/Sub publish:  ./scripts/pubsub-test-event.sh"
 echo ""
 EOT
 
-  filename = "${path.module}/start-emulators.sh"
+  filename        = "${path.module}/start-emulators.sh"
   file_permission = "0755"
 }
 
@@ -190,7 +190,7 @@ docker rm bq-emulator-local gcs-emulator-local pubsub-emulator-local 2>/dev/null
 echo "Emulators stopped."
 EOT
 
-  filename = "${path.module}/stop-emulators.sh"
+  filename        = "${path.module}/stop-emulators.sh"
   file_permission = "0755"
 }
 
@@ -203,39 +203,39 @@ resource "local_file" "trigger_github_event" {
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/.env"
+SCRIPT_DIR="$(cd "$(dirname "$${BASH_SOURCE[0]}")" && pwd)"
+source "$$SCRIPT_DIR/.env"
 
 echo "Simulating Eventarc trigger for GitHub Archive..."
 
 # Check if test file exists
-TEST_FILE="${1:-$SCRIPT_DIR/../../tests/fixtures/sample-gh.json.gz}"
+TEST_FILE="$${1:-$$SCRIPT_DIR/../../tests/fixtures/sample-gh.json.gz}"
 
-if [ ! -f "$TEST_FILE" ]; then
-    echo "Test file not found: $TEST_FILE"
+if [ ! -f "$$TEST_FILE" ]; then
+    echo "Test file not found: $$TEST_FILE"
     echo "Generating sample data..."
-    python3 "$SCRIPT_DIR/../../scripts/generate_sample_data.py" --source github --rows 10 --output /tmp/test-gh.json.gz
+    python3 "$$SCRIPT_DIR/../../scripts/generate_sample_data.py" --source github --rows 10 --output /tmp/test-gh.json.gz
     TEST_FILE="/tmp/test-gh.json.gz"
 fi
 
 # Upload to GCS emulator
-echo "Uploading $TEST_FILE to GCS emulator..."
-GCS_URL="http://localhost:4443/${GITHUB_BUCKET_NAME}/github-archive/raw/test-$(date +%s).json.gz"
+echo "Uploading $$TEST_FILE to GCS emulator..."
+GCS_URL="http://localhost:4443/$${GITHUB_BUCKET_NAME}/github-archive/raw/test-$$(date +%s).json.gz"
 
-curl -X PUT "$GCS_URL" \\
-    --data-binary "@$TEST_FILE" \\
+curl -X PUT "$$GCS_URL" \\
+    --data-binary "@$$TEST_FILE" \\
     -H "Content-Type: application/octet-stream"
 
 echo ""
-echo "File uploaded to: $GCS_URL"
+echo "File uploaded to: $$GCS_URL"
 
 # Publish to Pub/Sub (simulating Eventarc notification)
 echo "Publishing event to Pub/Sub..."
-PUBSUB_URL="http://localhost:8432/v1/projects/$PROJECT_ID/topics/github-events:publish"
+PUBSUB_URL="http://localhost:8432/v1/projects/$$PROJECT_ID/topics/github-events:publish"
 
-curl -X POST "$PUBSUB_URL" \\
+curl -X POST "$$PUBSUB_URL" \\
     -H "Content-Type: application/json" \\
-    -d "{\"messages\": [{\"data\": \"$(base64 <(echo -n '{"bucket":"'$GITHUB_BUCKET_NAME'","name":"github-archive/raw/test.json.gz"}'))\"}]}"
+    -d "{\"messages\": [{\"data\": \"$$(base64 <(echo -n '{\"bucket\":\"'$$GITHUB_BUCKET_NAME'\",\"name\":\"github-archive/raw/test.json.gz\"}'))\"}]}"
 
 echo ""
 echo "Event published to Pub/Sub"
@@ -243,10 +243,10 @@ echo ""
 echo "To manually trigger the processor:"
 echo "  curl -X POST http://localhost:8081/ \\"
 echo "    -H 'Content-Type: application/json' \\"
-echo "    -d '{\"bucket\": \"$GITHUB_BUCKET_NAME\", \"name\": \"github-archive/raw/test.json.gz\"}'"
+echo "    -d '{\"bucket\": \"$$GITHUB_BUCKET_NAME\", \"name\": \"github-archive/raw/test.json.gz\"}'"
 EOT
 
-  filename = "${path.module}/trigger-github-event.sh"
+  filename        = "${path.module}/trigger-github-event.sh"
   file_permission = "0755"
 }
 
@@ -259,18 +259,18 @@ resource "local_file" "trigger_hn_event" {
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/.env"
+SCRIPT_DIR="$(cd "$(dirname "$${BASH_SOURCE[0]}")" && pwd)"
+source "$$SCRIPT_DIR/.env"
 
 echo "Simulating Eventarc trigger for Hacker News fetch..."
 
 # Publish to Pub/Sub
 echo "Publishing event to Pub/Sub..."
-PUBSUB_URL="http://localhost:8432/v1/projects/$PROJECT_ID/topics/hn-events:publish"
+PUBSUB_URL="http://localhost:8432/v1/projects/$$PROJECT_ID/topics/hn-events:publish"
 
-curl -X POST "$PUBSUB_URL" \\
+curl -X POST "$$PUBSUB_URL" \\
     -H "Content-Type: application/json" \\
-    -d "{\"messages\": [{\"data\": \"$(base64 <(echo -n '{"action":"fetch","count":10}'))\"}]}"
+    -d "{\"messages\": [{\"data\": \"$$(base64 <(echo -n '{\"action\":\"fetch\",\"count\":10}'))\"}]}"
 
 echo ""
 echo "Event published to Pub/Sub"
@@ -279,7 +279,7 @@ echo "To manually trigger the processor:"
 echo "  curl http://localhost:8082/tasks/fetch?count=10"
 EOT
 
-  filename = "${path.module}/trigger-hn-event.sh"
+  filename        = "${path.module}/trigger-hn-event.sh"
   file_permission = "0755"
 }
 
@@ -561,18 +561,18 @@ EOT
 # Output configuration
 output "local_configuration" {
   value = {
-    project_id          = var.project_id
-    region              = var.region
-    bigquery_emulator   = "http://localhost:${local.bigquery_port}"
-    gcs_emulator        = "http://localhost:${local.gcs_emulator_port}"
-    pubsub_emulator     = "http://localhost:${local.pubsub_emulator_port}"
-    github_service      = "http://localhost:8081"
-    hn_service          = "http://localhost:8082"
-    github_bucket       = var.github_bucket_name
-    hn_bucket           = var.hn_bucket_name
-    github_dataset      = var.github_dataset_id
-    hn_dataset          = var.hn_dataset_id
-    start_command       = "cd environments/local && ./start-emulators.sh"
-    stop_command        = "cd environments/local && ./stop-emulators.sh"
+    project_id        = var.project_id
+    region            = var.region
+    bigquery_emulator = "http://localhost:${local.bigquery_port}"
+    gcs_emulator      = "http://localhost:${local.gcs_emulator_port}"
+    pubsub_emulator   = "http://localhost:${local.pubsub_emulator_port}"
+    github_service    = "http://localhost:8081"
+    hn_service        = "http://localhost:8082"
+    github_bucket     = var.github_bucket_name
+    hn_bucket         = var.hn_bucket_name
+    github_dataset    = var.github_dataset_id
+    hn_dataset        = var.hn_dataset_id
+    start_command     = "cd environments/local && ./start-emulators.sh"
+    stop_command      = "cd environments/local && ./stop-emulators.sh"
   }
 }
