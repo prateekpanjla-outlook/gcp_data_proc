@@ -70,3 +70,5 @@ Thumbs.db
 .terraform/
 *.tfvars
 !example.tfvars
+# Script logs
+logs/
