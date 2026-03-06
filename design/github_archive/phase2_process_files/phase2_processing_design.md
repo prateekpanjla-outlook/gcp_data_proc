@@ -2,7 +2,7 @@
 
 ## Overview
 
-Phase 2 processes GitHub Archive files landed in GCS by Phase 1, validates, transforms, and prepares them for BigQuery loading.
+Phase 2 processes GitHub Archive files landed in GCS by Phase 1, validates, transforms, and writes them to the staging bucket in NDJSON format. **BigQuery loading is handled by Phase 3.**
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -33,7 +33,9 @@ Phase 2 processes GitHub Archive files landed in GCS by Phase 1, validates, tran
 │                    │ Cloud Run Task:             │                    │ Cloud Run Job:              │    │
 │                    │ process_file()              │                    │ file_splitter              │    │
 │                    └─────────────────────────────┘                    │ • Splits into chunks        │    │
-│                                                                         • Emits chunk events      │    │
+│                                                                         • Writes to /chunks/
+                                                                         • Cloud Storage triggers
+                                                                         •   direct events for chunks      │    │
 │                                                                         └─────────────────────────────┘    │
 │                                                                                           │                  │    │
 │                                                                                           ▼                  │    │
@@ -140,18 +142,18 @@ Phase 2 processes GitHub Archive files landed in GCS by Phase 1, validates, tran
 │   │   2. Read line by line (memory efficient)                                                           │   │
 │   │   3. Every N lines (e.g., 10,000 events), write chunk to temp file                                   │   │
 │   │   4. Upload each chunk to: gs://landing-bucket/chunks/2026-03-05-12-chunk-001.json.gz              │   │
-│   │   5. Emit Pub/Sub message for each chunk                                                            │   │
+│   │   5. Cloud Storage emits direct event for each chunk                                                            │   │
 │   │   6. Delete original file after all chunks uploaded                                                 │   │
 │   │                                                                                                      │   │
 │   │ OUTPUT: gs://landing-bucket/chunks/2026-03-05-12-chunk-*.json.gz (N files of ~50MB each)           │   │
-│   │ MESSAGES: N Pub/Sub messages → trigger N processing tasks (parallel)                                │   │
+│   │ EVENTS: N direct events → trigger N processing tasks (parallel)                                │   │
 │   └─────────────────────────────────────────────────────────────────────────────────────────────────────┘   │
 │                                                                                                             │
 │   Chunk Processing (Parallel):                                                                               │
 │   ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐   │
-│   │ Each chunk → Cloud Run Task → Process → Staging → BigQuery Load                                    │   │
+│   │ Each chunk → Cloud Run Task → Process → Staging (GCS)                                            │   │
 │   │ Chunks processed in parallel (autoscaling)                                                          │   │
-│   │ Each chunk triggers BigQuery load immediately upon completion                                      │   │
+│   │ Phase 3 will load from staging to BigQuery                                                        │   │
 │   └─────────────────────────────────────────────────────────────────────────────────────────────────────┘   │
 │                                                                                                             │
 └─────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -285,8 +287,8 @@ class GitHubEventProcessor:
 
         return df
 
-    def flatten_for_bigquery(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Flatten schema for BigQuery loading"""
+    def flatten_for_staging(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Flatten schema for staging output (NDJSON format)"""
         result = pd.DataFrame({
             'event_id': df['id'],
             'event_type': df['type'],
@@ -307,7 +309,7 @@ class GitHubEventProcessor:
 
         # Extract and flatten
         chunk = self.extract_nested_fields(chunk)
-        flattened = self.flatten_for_bigquery(chunk)
+        flattened = self.flatten_for_staging(chunk)
 
         # Update stats
         self.stats['chunks_processed'] += 1
@@ -514,18 +516,18 @@ spec:
 
 ---
 
-## Output Format for BigQuery
+## Output Format for Staging
 
 ### Why NDJSON (Newline-Delimited JSON)?
 
-| Format | BigQuery Load | Streaming | Schema Evolution |
-|--------|---------------|-----------|------------------|
+| Format | Phase 3 BigQuery Ready | Streaming | Schema Evolution |
+|--------|----------------------|-----------|------------------|
 | **NDJSON** | ✅ Native | ✅ Easy | ✅ Additive |
 | Avro | ✅ Native | ❌ Complex | ✅ Full |
 | Parquet | ✅ Native | ❌ Complex | ⚠️ Limited |
 | CSV | ✅ Native | ✅ Easy | ❌ Positional |
 
-**Decision:** NDJSON for simplicity and schema flexibility.
+**Decision:** NDJSON for simplicity and Phase 3 BigQuery loading compatibility.
 
 ### Output Schema
 
@@ -568,7 +570,7 @@ gs://{project}-{env}-github-archive-landing/
 │   └── invalid-files/            # Files that failed validation
 │       └── {YYYY-MM-DD-HH}.json.gz
 
-gs://{project}-{env}-github-archive-staging/    # OUTPUT: Ready for BigQuery
+gs://{project}-{env}-github-archive-staging/    # OUTPUT: Processed files (Phase 3 loads to BigQuery from here)
 └── github-archive/
     └── processed/
         └── {YYYY-MM-DD-HH}.ndjson.gz
@@ -580,12 +582,12 @@ gs://{project}-{env}-github-archive-staging/    # OUTPUT: Ready for BigQuery
 
 | Component | Type | Purpose | Scaling |
 |-----------|------|---------|---------|
-| **Eventarc Trigger** | Trigger | Detects new files in raw/ | N/A (event) |
+| **Eventarc Trigger #1** | Trigger | Detects new files in raw/ | N/A (event) |
+| **Eventarc Trigger #2** | Trigger | Detects new files in chunks/ | N/A (event) |
 | **github-archive-processor** | Cloud Run Service | Main file processor | 0-100 instances |
 | **file-splitter** | Cloud Run Job | Splits large files | Manual concurrency |
 | **chunk-processor** | Cloud Run Task | Processes chunks | Inherits from service |
-| **Pub/Sub Topic** | Messaging | Chunk events for large files | N/A |
-| **BigQuery** | Data Warehouse | Loads each chunk as finalized | N/A |
+| **Cloud Logging** | Monitoring | Error logging and metrics | N/A |
 | **Cloud Logging** | Monitoring | Error logging and metrics | N/A |
 
 ---
@@ -632,8 +634,6 @@ phase2_process_files/
 │           ├── utils/
 │           │   ├── __init__.py
 │           │   ├── gcs_client.py                   # GCS utilities
-│           │   ├── pubsub_client.py                # Pub/Sub utilities
-│           │   ├── bigquery_client.py              # BigQuery load trigger
 │           │   └── logger.py                       # Cloud Logging utilities
 │           ├── config.py                           # Configuration
 │           ├── requirements.txt
@@ -657,11 +657,9 @@ phase2_process_files/
         │   ├── main.tf
         │   ├── variables.tf
         │   ├── outputs.tf
-        │   ├── eventarc.tf                    # Eventarc trigger
+        │   ├── eventarc.tf                    # Eventarc trigger (direct events)
         │   ├── cloud_run_service.tf           # Processor service
         │   ├── cloud_run_job_splitter.tf      # File splitter job
-        │   ├── pubsub.tf                      # Chunk events topic
-        │   ├── bigquery.tf                    # BigQuery dataset & table
         │   ├── storage.tf                     # Staging bucket
         │   ├── monitoring.tf                  # Cloud Logging & Monitoring alerts
         │   ├── service_accounts.tf

@@ -13,7 +13,7 @@ graph LR
     ScaleMin -->|10 req/instance| ScaleMid
     ScaleMid -->|10 req/instance| ScaleMax
 
-    ScaleMax -->|Queue full| Throttle[Throttle incoming<br>Pub/Sub retries]
+    ScaleMax -->|Queue full| Throttle[Throttle incoming<br>Eventarc retries]
     ScaleMin -->|Idle 30s| Scale0
 
     style Scale0 fill:#e3f2fd

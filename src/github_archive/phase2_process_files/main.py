@@ -1,0 +1,355 @@
+"""
+Cloud Run Service entry point for GitHub Archive Phase 2 processing.
+
+Receives Eventarc events when files land in the landing bucket,
+validates, transforms, and writes them to the staging bucket.
+"""
+
+import os
+import json
+import time
+from typing import Dict, Any
+
+from flask import Flask, request, jsonify
+from google.cloud import error_reporting
+import google.auth.transport.requests
+import google.oauth2.id_token
+
+from .processors.file_processor import GitHubArchiveFileProcessor, FileProcessingResult
+from .utils.logger import Phase2Logger, log_structured
+from .utils.gcs_client import GCSPath
+
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+PROJECT_ID = os.getenv('PROJECT_ID')
+LANDING_BUCKET = os.getenv('LANDING_BUCKET')
+STAGING_BUCKET = os.getenv('STAGING_BUCKET')
+FILE_SIZE_THRESHOLD_MB = int(os.getenv('FILE_SIZE_THRESHOLD_MB', '500'))
+CHUNKSIZE = int(os.getenv('CHUNKSIZE', '100000'))
+
+# Cloud Run requires 0.0.0.0 binding
+HOST = '0.0.0.0'
+PORT = int(os.getenv('PORT', '8080'))
+
+# =============================================================================
+# APP INITIALIZATION
+# =============================================================================
+app = Flask(__name__)
+
+# Initialize logger
+logger = Phase2Logger(component='phase2-processor', project_id=PROJECT_ID)
+
+# Initialize processor
+processor = GitHubArchiveFileProcessor(
+    project_id=PROJECT_ID,
+    landing_bucket=LANDING_BUCKET,
+    staging_bucket=STAGING_BUCKET,
+    chunksize=CHUNKSIZE,
+    file_size_threshold_mb=FILE_SIZE_THRESHOLD_MB,
+    logger=logger
+)
+
+# Error reporting
+error_reporter = None
+try:
+    error_reporter = error_reporting.Client()
+except Exception:
+    pass
+
+
+# =============================================================================
+# HEALTH CHECK
+# =============================================================================
+@app.route('/', methods=['GET'])
+@app.route('/health', methods=['GET'])
+def health_check() -> tuple[Dict[str, Any], int]:
+    """Health check endpoint."""
+    return jsonify({
+        'status': 'healthy',
+        'service': 'github-archive-processor',
+        'project': PROJECT_ID,
+        'landing_bucket': LANDING_BUCKET,
+        'staging_bucket': STAGING_BUCKET
+    }), 200
+
+
+# =============================================================================
+# READINESS PROBE
+# =============================================================================
+@app.route('/ready', methods=['GET'])
+def readiness_check() -> tuple[Dict[str, Any], int]:
+    """Readiness check endpoint."""
+    checks = {
+        'config_valid': all([
+            PROJECT_ID,
+            LANDING_BUCKET,
+            STAGING_BUCKET
+        ])
+    }
+
+    ready = all(checks.values())
+
+    status_code = 200 if ready else 503
+    return jsonify({
+        'ready': ready,
+        'checks': checks
+    }), status_code
+
+
+# =============================================================================
+# MAIN PROCESSING HANDLER (Eventarc trigger)
+# =============================================================================
+@app.route('/', methods=['POST'])
+def process_file_event() -> tuple[Dict[str, Any], int]:
+    """
+    Handle Eventarc event for new files in landing bucket.
+
+    Expected Cloud Storage event format:
+    {
+        "bucket": "bucket-name",
+        "name": "path/to/file.json.gz",
+        "resourceState": "exists",
+        "metageneration": "1"
+    }
+    """
+    start_time = time.time()
+
+    # Verify request is from Google Cloud
+    try:
+        auth_request = google.auth.transport.requests.Request()
+        id_token.verify_oauth2_token(
+            request.headers.get('Authorization').replace('Bearer ', ''),
+            auth_request,
+            audience=f'https://{PROJECT_ID}.{os.getenv("REGION", "us-central1")}.run.app'
+        )
+    except Exception as e:
+        logger.warning(f"Authentication failed: {e}")
+        # For local testing, continue without auth
+        if os.getenv('LOCAL_DEV') != 'true':
+            return jsonify({'error': 'Authentication failed'}), 401
+
+    # Parse event payload
+    try:
+        event = request.get_json()
+        if not event:
+            return jsonify({'error': 'No event payload'}), 400
+
+    except Exception as e:
+        logger.error(f"Failed to parse event: {e}")
+        return jsonify({'error': f'Invalid event payload: {e}'}), 400
+
+    # Extract event data
+    bucket = event.get('bucket')
+    file_name = event.get('name')
+    resource_state = event.get('resourceState')
+
+    logger.info(
+        "Received Eventarc event",
+        bucket=bucket,
+        file_name=file_name,
+        resource_state=resource_state
+    )
+
+    # Validate this is for our landing bucket
+    if bucket != os.path.basename(LANDING_BUCKET):
+        logger.warning(f"Event for wrong bucket: {bucket}, expected {LANDING_BUCKET}")
+        return jsonify({'status': 'ignored', 'reason': 'wrong bucket'}), 200
+
+    # Only process on finalize
+    if resource_state == 'not_exists':
+        logger.info(f"File deleted, ignoring: {file_name}")
+        return jsonify({'status': 'ignored', 'reason': 'file deleted'}), 200
+
+    # Check file path (only process raw/ files, not chunks/)
+    # Chunks are processed by a separate trigger
+    if '/chunks/' in file_name:
+        logger.info(f"Chunk file, will be processed by chunk processor: {file_name}")
+        return jsonify({'status': 'ignored', 'reason': 'chunk file'}), 200
+
+    if not file_name.endswith('.json.gz'):
+        logger.warning(f"Invalid file type: {file_name}")
+        return jsonify({'status': 'ignored', 'reason': 'invalid file type'}), 200
+
+    # Build full GCS path
+    input_gcs_path = f"gs://{bucket}/{file_name}"
+
+    # Process the file
+    try:
+        result = processor.process_file(input_gcs_path)
+
+        duration = time.time() - start_time
+
+        # Handle file split required case
+        if result.error_message == 'FILE_SPLIT_REQUIRED':
+            # Trigger file splitter job
+            from google.cloud import run_v2
+            from .processors.file_splitter import run_splitter_job
+
+            logger.info(f"Triggering file splitter for: {file_name}")
+
+            try:
+                # Execute file splitter job
+                # Note: In production, you might want to use Cloud Tasks or Pub/Sub
+                # to trigger this asynchronously
+                split_result = run_splitter_job(
+                    input_file=input_gcs_path,
+                    project_id=PROJECT_ID,
+                    landing_bucket=LANDING_BUCKET
+                )
+
+                response_data = {
+                    'status': 'split',
+                    'action': 'file_splitter_executed',
+                    'input_file': input_gcs_path,
+                    'chunk_count': split_result['chunk_count'],
+                    'total_records': split_result['total_records'],
+                    'output_files': split_result['output_files'],
+                    'duration_seconds': round(duration, 2)
+                }
+
+                logger.info(f"File split completed: {split_result['chunk_count']} chunks created")
+
+                return jsonify(response_data), 200
+
+            except Exception as split_error:
+                logger.error(f"File splitter failed: {split_error}")
+                return jsonify({
+                    'status': 'error',
+                    'error': f'File splitter failed: {str(split_error)}',
+                    'input_file': input_gcs_path
+                }), 500
+
+        # Normal processing response
+        response_data = {
+            'status': 'success' if result.success else 'failed',
+            'input_file': result.input_file,
+            'output_file': result.output_file,
+            'output_files': result.output_files or [],
+            'output_count': result.output_count,
+            'records_in': result.records_in,
+            'records_out': result.records_out,
+            'errors': result.errors,
+            'warnings': result.warnings,
+            'duration_seconds': round(duration, 2)
+        }
+
+        status_code = 200 if result.success else 207  # 207 for partial success
+
+        logger.info(
+            f"Processing {'completed' if result.success else 'failed'}: {file_name}",
+            **response_data
+        )
+
+        return jsonify(response_data), status_code
+
+    except Exception as e:
+        duration = time.time() - start_time
+        error_msg = f"Processing error: {str(e)}"
+
+        logger.error(
+            error_msg,
+            file_name=file_name,
+            duration_seconds=round(duration, 2)
+        )
+
+        if error_reporter:
+            error_reporter.report_exception()
+
+        return jsonify({
+            'status': 'error',
+            'error': error_msg,
+            'duration_seconds': round(duration, 2)
+        }), 500
+
+
+# =============================================================================
+# MANUAL TRIGGER (for testing)
+# =============================================================================
+@app.route('/process', methods=['POST'])
+def process_manual() -> tuple[Dict[str, Any], int]:
+    """
+    Manually trigger processing of a file.
+
+    Request body:
+    {
+        "file_path": "gs://bucket/path/to/file.json.gz"
+    }
+    """
+    try:
+        data = request.get_json()
+        file_path = data.get('file_path')
+
+        if not file_path:
+            return jsonify({'error': 'file_path is required'}), 400
+
+        # Validate path format
+        if not file_path.startswith('gs://'):
+            return jsonify({'error': 'file_path must be a gs:// path'}), 400
+
+        logger.info(f"Manual processing request for: {file_path}")
+
+        result = processor.process_file(file_path)
+
+        return jsonify({
+            'status': 'success' if result.success else 'failed',
+            'input_file': result.input_file,
+            'output_file': result.output_file,
+            'records_in': result.records_in,
+            'records_out': result.records_out,
+            'errors': result.errors,
+            'warnings': result.warnings,
+            'duration_seconds': result.duration_seconds
+        }), 200 if result.success else 500
+
+    except Exception as e:
+        logger.error(f"Manual processing error: {e}")
+        if error_reporter:
+            error_reporter.report_exception()
+        return jsonify({'error': str(e)}), 500
+
+
+# =============================================================================
+# METRICS ENDPOINT
+# =============================================================================
+@app.route('/metrics', methods=['GET'])
+def get_metrics() -> tuple[Dict[str, Any], int]:
+    """Get processing metrics."""
+    metrics = processor.get_metrics()
+    metrics_dict = metrics.to_dict()
+    processor.reset_metrics()
+    return jsonify(metrics_dict), 200
+
+
+# =============================================================================
+# ERROR HANDLERS
+# =============================================================================
+@app.errorhandler(404)
+def not_found(error) -> tuple[Dict[str, Any], int]:
+    """Handle 404 errors."""
+    return jsonify({'error': 'Not found'}), 404
+
+
+@app.errorhandler(500)
+def internal_error(error) -> tuple[Dict[str, Any], int]:
+    """Handle 500 errors."""
+    logger.error(f"Internal error: {error}")
+    if error_reporter:
+        error_reporter.report_exception()
+    return jsonify({'error': 'Internal server error'}), 500
+
+
+# =============================================================================
+# MAIN
+# =============================================================================
+if __name__ == '__main__':
+    logger.info(
+        "Starting GitHub Archive Processor",
+        project=PROJECT_ID,
+        landing_bucket=LANDING_BUCKET,
+        staging_bucket=STAGING_BUCKET,
+        port=PORT
+    )
+
+    app.run(host=HOST, port=PORT, debug=False)

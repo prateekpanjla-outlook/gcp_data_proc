@@ -45,4 +45,4 @@ graph LR
 | **Sample Input** | `{"id":"123","type":"PushEvent","actor":{"id":456,"login":"octocat"},...}` | `{"event_id":"123","event_type":"PushEvent","actor_id":456,"actor_login":"octocat",...}` |
 | **Fields** | ~20 nested | ~50 flattened |
 | **Timestamp** | ISO string | ISO string (validated) |
-| **Purpose** | Raw archive format | BigQuery ready |
+| **Purpose** | Raw archive format | Staging format (validated, flattened) |

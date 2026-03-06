@@ -16,7 +16,7 @@ graph TB
     L4 -->|Pass| L5{Layer 5:<br>Business Rules}
     L4 -->|Fail| Filter[Filter out<br>Move to DLQ]
 
-    L5 -->|Pass| Output([✅ Valid Event])
+    L5 -->|Pass| Output([Valid Event])
     L5 -->|Fail| DLQ[Move to DLQ<br>gs://dlq/events/]
 
     style Input fill:#e3f2fd

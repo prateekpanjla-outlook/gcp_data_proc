@@ -31,5 +31,10 @@ variable "force_destroy" {
 variable "bucket_lifecycle_days" {
   description = "Number of days before landing bucket files are deleted"
   type        = number
-  default     = 90
+  default     = 6
+
+  validation {
+    condition     = var.bucket_lifecycle_days >= 1
+    error_message = "Lifecycle days must be at least 1."
+  }
 }

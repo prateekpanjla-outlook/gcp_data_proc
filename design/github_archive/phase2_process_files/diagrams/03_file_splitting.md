@@ -13,22 +13,19 @@ graph TD
 
     WriteChunk --> Upload["Upload chunk to GCS<br>gs://.../chunks/{file}-chunk-{N}.json.gz"]
 
-    Upload --> Emit[Emit Pub/Sub event<br>for this chunk]
+    Upload --> Finalize[Cloud Storage finalize<br>event triggered]
 
-    Emit --> Reset[Reset counter<br>Continue reading]
+    Finalize --> Reset[Reset counter<br>Continue reading]
 
     Reset --> Stream
 
     Stream -->|EOF| Cleanup[Delete original file<br>from raw/]
 
-    Cleanup --> Track[Create tracking record<br>in Firestore]
-
-    Track --> Fire[Fire chunk events<br>in parallel]
-
-    Fire --> Done([✅ Split Complete])
+    Cleanup --> Done([Split Complete])
 
     style Start fill:#fff3e0
     style Done fill:#e1f5e1
+    style Finalize fill:#e3f2fd
 ```
 
 **Splitting Configuration:**
@@ -39,6 +36,14 @@ graph TD
 | **Chunk size** | 10,000 events | ~50MB per chunk |
 | **Max chunks** | ~100 per file | 1.2GB → ~120 chunks |
 | **Parallelism** | N chunks at once | Autoscaling handles |
+
+**Chunk Filename Convention:**
+
+```
+{original-basename}-chunk-{chunk_number:03d}-of-{total_chunks:03d}-{event_count}.json.gz
+
+Example: 2026-03-05-12-chunk-001-of-012-10000.json.gz
+```
 
 **File Splitter Job Specification:**
 
@@ -67,43 +72,37 @@ resource "google_cloud_run_v2_job" "file_splitter" {
 }
 ```
 
-**Chunk Processing Flow:**
+**Chunk Processing Flow (Direct Events Only):**
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                              CHUNK PROCESSING ORCHESTRATION                                                 │
+│                              CHUNK PROCESSING ORCHESTRATION (Direct Events)                                  │
 ├─────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                                             │
-│   File Splitter emits N Pub/Sub events → N Cloud Run Tasks (parallel)                                       │
+│   File Splitter writes N chunks to GCS → Cloud Storage emits N direct events → N Cloud Run Tasks (parallel)  │
 │                                                                                                             │
+│   Flow:                                                                                                      │
 │   ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐   │
-│   │ Firestore Document Tracking                                                                         │   │
-│   │ Collection: file_chunks                                                                            │   │
-│   │ Document ID: {original_file_name}                                                                  │   │
-│   │ {                                                                                                   │   │
-│   │   "original_file": "2026-03-05-12.json.gz",                                                         │   │
-│   │   "status": "splitting",                                                                            │   │
-│   │   "total_chunks": 15,                                                                               │   │
-│   │   "chunks_processed": 0,                                                                           │   │
-│   │   "chunks": [                                                                                      │   │
-│   │     {"chunk_id": "chunk-001", "status": "pending", "output": "..."},                                │   │
-│   │     {"chunk_id": "chunk-002", "status": "pending", "output": "..."},                                │   │
-│   │     ...                                                                                             │   │
-│   │   ],                                                                                                │   │
-│   │   "created_at": "2026-03-05T12:00:00Z",                                                             │   │
-│   │   "completed_at": null                                                                              │   │
-│   │ }                                                                                                   │   │
+│   │ 1. File Splitter uploads chunk to:                                                                  │   │
+│   │    gs://.../chunks/2026-03-05-12-chunk-001-of-012-10000.json.gz                                    │   │
+│   │                                                                                                      │   │
+│   │ 2. Cloud Storage emits finalize event                                                               │   │
+│   │                                                                                                      │   │
+│   │ 3. Eventarc Trigger #2 (filtered for chunks/) routes to Cloud Run chunk processor                    │   │
+│   │                                                                                                      │   │
+│   │ 4. Chunk processor extracts metadata from filename:                                                 │   │
+│   │    - Original file: 2026-03-05-12                                                                    │   │
+│   │    - Chunk number: 001 of 012                                                                       │   │
+│   │    - Event count: 10000                                                                             │   │
+│   │                                                                                                      │   │
+│   │ 5. Process chunk → Write to staging bucket                                                      │   │
 │   └─────────────────────────────────────────────────────────────────────────────────────────────────────┘   │
-│                                                             │                                             │
-│                                    Each chunk processor updates status                                          │
-│                                                             │                                             │
-│                                                             ▼                                             │
-│   ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐   │
-│   │ When chunks_processed == total_chunks:                                                             │   │
-│   │   → Update status to "completed"                                                                   │   │
-│   │   → Trigger BigQuery load for all chunks                                                           │   │
-│   │   → Mark original file as ready for cleanup                                                        │   │
-│   └─────────────────────────────────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                                             │
+│   Benefits:                                                                                                  │
+│   • No Pub/Sub costs                                                                                        │
+│   • Simpler architecture (no topic/subscription management)                                                │
+│   • File is the source of truth                                                                             │
+│   • Same latency as Pub/Sub (both use direct events)                                                        │
 │                                                                                                             │
 └─────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```

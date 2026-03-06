@@ -3,26 +3,25 @@
 ```mermaid
 sequenceDiagram
     participant S as Cloud Storage
-    participant E as Eventarc
-    participant P as Pub/Sub
-    participant CRS as Cloud Run Service
-    participant CRJ as Cloud Run Job
+    participant E1 as Eventarc Trigger #1
+    participant CRS as Cloud Run Service<br>Processor
+    participant CRJ as Cloud Run Job<br>File Splitter
+    participant E2 as Eventarc Trigger #2
+    participant CRC as Cloud Run Service<br>Chunk Processor
     participant STG as Staging Bucket
-    participant BQ as BigQuery
     participant LOG as Cloud Logging
 
     Note over S: File lands: 2026-03-05-12.json.gz
-    S->>E: finalize event
+    S->>E1: finalize event
 
-    E->>P: Publish to event topic
-    P->>CRS: HTTP POST /process
+    E1->>CRS: HTTP POST /
 
     CRS->>CRS: Parse event payload
     CRS->>S: Get file metadata
 
     alt File size < 500MB
         CRS->>S: Download file
-        CRS->>CRS: Pandas chunked processing<br/>chunksize=100K
+        CRS->>CRS: Pandas chunked processing<br>chunksize=100K
 
         loop For each chunk (100K records)
             CRS->>CRS: Parse JSON (pd.read_json)
@@ -32,7 +31,6 @@ sequenceDiagram
             CRS->>STG: Write chunk output immediately
         end
 
-        CRS->>BQ: Trigger BigQuery load
         CRS->>LOG: Log completion
 
     else File size >= 500MB
@@ -42,35 +40,37 @@ sequenceDiagram
         Note over CRJ: Stream read, split into chunks
 
         loop For each chunk (10K lines)
-            CRJ->>S: Upload chunk to chunks/
-            CRJ->>P: Publish chunk event
+            CRJ->>S: Upload chunk to chunks/<br>filename: ...-chunk-001-of-012-10000.json.gz
+            Note over S: Cloud Storage emits<br>finalize event automatically
         end
 
         CRJ->>S: Delete original file
         CRJ->>LOG: Log split complete
 
-        Note over P: N chunk events published
+        Note over E2: N chunk finalize events
 
         loop For each chunk event
-            P->>CRS: HTTP POST /process-chunk
-            CRS->>S: Download chunk
-            CRS->>CRS: Process chunk with Pandas<br/>validate dtypes + values (vectorized)
-            CRS->>STG: Upload chunk output
-            CRS->>BQ: Trigger BigQuery load (per chunk)
-            CRS->>LOG: Log chunk completion
+            S->>E2: finalize event
+            E2->>CRC: HTTP POST /
+
+            CRC->>CRC: Parse filename for metadata<br>- Chunk number<br>- Total chunks<br>- Event count
+            CRC->>S: Download chunk
+            CRC->>CRC: Process chunk with Pandas<br>validate dtypes + values (vectorized)
+            CRC->>STG: Upload chunk output
+            CRC->>LOG: Log chunk completion
         end
     end
 
     alt Validation errors
         CRS->>LOG: Log error details
         CRS->>LOG: Increment error counter
+        CRC->>LOG: Log error details
     end
-
-    CRS->>P: ACK completion
 ```
 
 **Sequence Notes:**
 - Small files processed directly in single request
-- Large files split first, then processed in parallel via Pub/Sub
-- Each chunk triggers BigQuery load immediately upon completion (no state tracking)
+- Large files split first, then each chunk triggers processing via direct events
+- Phase 2 ends when validated data is written to staging bucket in NDJSON format
 - All errors logged to Cloud Logging with monitoring alerts
+- **No Pub/Sub costs** - all triggers use direct events from Cloud Storage

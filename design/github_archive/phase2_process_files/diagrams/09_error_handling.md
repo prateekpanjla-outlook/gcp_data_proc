@@ -13,7 +13,7 @@ graph TD
     FileErr --> FileAction[Move entire file<br>to invalid-files/]
     FileAction --> LogFile[Log error details]
     LogFile --> AlertFile[Cloud Monitoring Alert]
-    AlertFile --> EndFile([❌ File Failed])
+    AlertFile --> EndFile([File Failed])
 
     LineErr --> LineAction[Skip line<br>Count error<br>Continue processing]
     LineAction --> LogLine[Increment error counter]
@@ -21,7 +21,7 @@ graph TD
     CheckRate -->|Yes| Abort[Abort processing<br>Log critical error]
     CheckRate -->|No| ContinueLine([Continue next line])
     Abort --> AlertRate[Alert team]
-    AlertRate --> EndAbort([❌ Processing Aborted])
+    AlertRate --> EndAbort([Processing Aborted])
 
     SchemaErr --> LogSchema[Log schema violation<br>Continue with valid records]
     BizErr --> LogBiz[Log business rule violation<br>Continue with valid records]
