@@ -30,6 +30,9 @@ VALID_EVENT_TYPES: Set[str] = {
     'CommitCommentEvent',
     'TeamAddEvent',
     'ProtectBranchEvent',
+    # Newer event types (added 2025+)
+    'PublicEvent',
+    'DiscussionEvent',
 }
 
 
