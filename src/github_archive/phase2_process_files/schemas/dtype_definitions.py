@@ -39,17 +39,22 @@ VALID_EVENT_TYPES: Set[str] = {
 # =============================================================================
 # INPUT SCHEMA (GitHub Archive - Nested JSON)
 # =============================================================================
+# Using pandas extension types that map naturally to JSON
+# 'string'  - nullable string (handles JSON null)
+# 'Int64'   - nullable integer (handles JSON null)
+# 'boolean' - nullable boolean (handles JSON null)
+# 'object'  - Python object (for nested dicts/lists)
 GITHUB_EVENT_DTYPES: Dict[str, str] = {
-    # Core fields
+    # Core fields (all present in 100% of records)
     'id': 'string',
     'type': 'string',
     'public': 'boolean',
     'created_at': 'string',
-    # Nested objects (will be extracted)
+    # Nested objects (will be extracted/flattened)
     'actor': 'object',
     'repo': 'object',
     'payload': 'object',
-    # Optional fields
+    # Optional fields (not always present)
     'org': 'object',
     'other': 'object',
 }
@@ -58,19 +63,19 @@ GITHUB_EVENT_DTYPES: Dict[str, str] = {
 # =============================================================================
 # ACTOR FIELD DEFINITIONS
 # =============================================================================
-# Based on actual GitHub Archive data analysis (1000+ records)
+# Based on actual GitHub Archive data analysis (161,786 records validated)
 # Core fields: id, login, display_login, gravatar_id, url, avatar_url
-# Note: 'type' and 'site_admin' are in GitHub API spec but not typically in GH Archive
+# Note: 'type' and 'site_admin' are in GitHub API spec but not in GH Archive data
 ACTOR_FIELDS: Dict[str, str] = {
-    'actor_id': 'int64',
-    'actor_login': 'string',
+    'actor_id': 'Int64',          # nullable integer (JSON null → pd.NA)
+    'actor_login': 'string',       # nullable string
     'actor_display_login': 'string',  # Present in 100% of GH Archive records
-    'actor_gravatar_id': 'string',
-    'actor_url': 'string',
-    'actor_avatar_url': 'string',
+    'actor_gravatar_id': 'string',  # nullable string (often empty)
+    'actor_url': 'string',         # nullable string
+    'actor_avatar_url': 'string',   # nullable string
     # Optional fields (GitHub API spec but rarely/never in GH Archive)
-    'actor_type': 'string',  # Optional
-    'actor_site_admin': 'boolean',  # Optional
+    'actor_type': 'string',        # Optional, nullable
+    'actor_site_admin': 'boolean',  # Optional, nullable
 }
 
 
@@ -78,34 +83,39 @@ ACTOR_FIELDS: Dict[str, str] = {
 # REPO FIELD DEFINITIONS
 # =============================================================================
 REPO_FIELDS: Dict[str, str] = {
-    'repo_id': 'int64',
-    'repo_name': 'string',
-    'repo_url': 'string',
+    'repo_id': 'Int64',      # nullable integer
+    'repo_name': 'string',   # nullable string
+    'repo_url': 'string',    # nullable string
 }
 
 
 # =============================================================================
 # OUTPUT SCHEMA (Flattened for Staging - NDJSON)
 # =============================================================================
+# Pandas extension types that map to JSON:
+# - 'string': nullable string (JSON null → pd.NA)
+# - 'Int64': nullable integer (JSON null → pd.NA)
+# - 'boolean': nullable boolean (JSON null → pd.NA)
+# - 'float64': floating point (handles decimals)
 OUTPUT_SCHEMA: Dict[str, str] = {
     # Event identifiers
     'event_id': 'string',
     'event_type': 'string',
     'created_at': 'string',
 
-    # Actor fields
-    'actor_id': 'int64',
+    # Actor fields (from nested actor object)
+    'actor_id': 'Int64',
     'actor_login': 'string',
     'actor_display_login': 'string',
     'actor_gravatar_id': 'string',
     'actor_url': 'string',
     'actor_avatar_url': 'string',
-    # Optional (GitHub API spec but rarely in GH Archive)
-    'actor_type': 'string',
-    'actor_site_admin': 'boolean',
+    # Optional (GitHub API spec but rarely/never in GH Archive)
+    'actor_type': 'string',      # nullable
+    'actor_site_admin': 'boolean', # nullable
 
-    # Repository fields
-    'repo_id': 'int64',
+    # Repository fields (from nested repo object)
+    'repo_id': 'Int64',
     'repo_name': 'string',
     'repo_url': 'string',
 
@@ -115,9 +125,9 @@ OUTPUT_SCHEMA: Dict[str, str] = {
     # Payload fields (common across event types)
     'payload_ref': 'string',
     'payload_ref_type': 'string',
-    'payload_push_id': 'int64',
-    'payload_size': 'int64',
-    'payload_distinct_size': 'int64',
+    'payload_push_id': 'Int64',
+    'payload_size': 'Int64',
+    'payload_distinct_size': 'Int64',
     'payload_head': 'string',
     'payload_before': 'string',
 }
@@ -211,15 +221,15 @@ VALIDATION_RULES: List[ValidationRule] = [
     # Timestamp validation (ISO 8601 format)
     ValidationRule(field='created_at', dtype='string', nullable=False),
 
-    # Actor fields
-    ValidationRule(field='actor_id', dtype='int64', nullable=False, min_value=1),
+    # Actor fields (nullable Int64 for JSON null handling)
+    ValidationRule(field='actor_id', dtype='Int64', nullable=False, min_value=1),
     ValidationRule(field='actor_login', dtype='string', nullable=False),
 
-    # Repo fields
-    ValidationRule(field='repo_id', dtype='int64', nullable=False, min_value=1),
+    # Repo fields (nullable Int64 for JSON null handling)
+    ValidationRule(field='repo_id', dtype='Int64', nullable=False, min_value=1),
     ValidationRule(field='repo_name', dtype='string', nullable=False),
 
-    # Public flag
+    # Public flag (nullable boolean for JSON null handling)
     ValidationRule(field='public', dtype='boolean', nullable=True),
 ]
 
@@ -281,7 +291,10 @@ def validate_output_schema(record: Dict[str, Any]) -> List[str]:
 
         # Check dtype (basic check)
         expected_type = rule.dtype
-        if expected_type == 'int64':
+        if expected_type == 'Int64':
+            if not isinstance(value, int):
+                errors.append(f"Field '{rule.field}' should be Int64, got {type(value).__name__}")
+        elif expected_type == 'int64':
             if not isinstance(value, int):
                 errors.append(f"Field '{rule.field}' should be int64, got {type(value).__name__}")
         elif expected_type == 'string':

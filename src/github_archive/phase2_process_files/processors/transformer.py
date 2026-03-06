@@ -237,7 +237,7 @@ class GitHubEventTransformer:
             if col in df.columns:
                 df[col] = df[col].astype('string')
 
-        # Integer columns
+        # Integer columns (nullable Int64 - handles JSON null properly)
         int_cols = [
             'actor_id', 'repo_id', 'payload_push_id',
             'payload_size', 'payload_distinct_size'
@@ -245,7 +245,7 @@ class GitHubEventTransformer:
 
         for col in int_cols:
             if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+                df[col] = df[col].astype('Int64')
 
         # Boolean columns
         bool_cols = ['public', 'actor_site_admin']
