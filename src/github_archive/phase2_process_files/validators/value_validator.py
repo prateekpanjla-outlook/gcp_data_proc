@@ -53,18 +53,15 @@ class ValueValidator:
 
     def __init__(
         self,
-        strict_mode: bool = False,
-        max_error_rate: float = 0.10
+        strict_mode: bool = False
     ):
         """
         Initialize the value validator.
 
         Args:
             strict_mode: If True, filter out all invalid records
-            max_error_rate: Maximum error rate before aborting (0.0-1.0)
         """
         self.strict_mode = strict_mode
-        self.max_error_rate = max_error_rate
 
     def validate_required_fields(self, df: pd.DataFrame) -> ValueValidationResult:
         """
@@ -367,9 +364,8 @@ class ValueValidator:
             total_invalid += result.invalid_count
             current_df = result.valid_df if result.valid_df is not None else current_df
 
-        # Check error rate
-        error_rate = total_invalid / df.shape[0] if df.shape[0] > 0 else 0
-        is_valid = error_rate <= self.max_error_rate
+        # Fail on any errors (strict validation)
+        is_valid = total_invalid == 0
 
         return ValueValidationResult(
             is_valid=is_valid,

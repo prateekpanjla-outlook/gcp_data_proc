@@ -248,7 +248,6 @@ class ProcessingConfig:
 
     # Validation
     strict_mode: bool = False  # If True, abort on any validation error
-    max_error_rate: float = 0.10  # Max 10% errors before aborting
 
     # Output
     output_compression: bool = True
