@@ -250,6 +250,74 @@ gcloud logging read "resource.type=cloud_run_job" --limit=20
 
 ---
 
+---
+
+## Future Enhancements
+
+### BigQuery Nested Schema Support
+
+#### Current State
+- **Flattened schema**: We flatten nested JSON structures into single-level columns
+- **Payload handling**: Only common payload fields are extracted (ref, push_id, size, etc.)
+- **Complex nested data**: Full payload objects (issue, pull_request, user, labels, etc.) are NOT stored
+
+#### Proposed: BigQuery Nested/Repeated Fields
+
+BigQuery supports nested (STRUCT) and repeated (ARRAY) fields, which would preserve the complete GitHub Archive structure without flattening.
+
+**Example Nested Schema:**
+```sql
+CREATE TABLE `project.dataset.github_events_nested` (
+  event_id STRING,
+  event_type STRING,
+  created_at TIMESTAMP,
+
+  -- Nested actor (STRUCT)
+  actor STRUCT<
+    id INT64,
+    login STRING,
+    display_login STRING,
+    avatar_url STRING
+  >,
+
+  -- Nested repo (STRUCT)
+  repo STRUCT<
+    id INT64,
+    name STRING,
+    url STRING
+  >,
+
+  -- Nested payload with arrays
+  payload STRUCT<
+    action STRING,
+    issue STRUCT<
+      id INT64,
+      title STRING,
+      labels ARRAY<STRUCT<
+        name STRING,
+        color STRING
+      >>
+    >
+  >
+)
+```
+
+**Benefits:**
+- Preserve complete GitHub data (50+ fields vs 15-20)
+- More flexible querying with dot notation
+- No data loss from flattening
+
+**Trade-offs:**
+- Larger storage requirements
+- Slightly slower query performance
+- More complex schema management
+
+**Decision:** Keep flattened schema for Phase 2. Consider nested schema when business requirements justify the complexity.
+
+**Reference:** [BigQuery Nested & Repeated Fields](https://cloud.google.com/bigquery/docs/nested-repeated)
+
+---
+
 ## References
 
 - [Google Cloud Free Tier](https://docs.cloud.google.com/free/docs/free-cloud-features)

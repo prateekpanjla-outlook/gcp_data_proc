@@ -8,11 +8,15 @@ GitHub Archive events processed from Phase 1 landing zone to Phase 2 staging.
 from typing import Dict, List, Set, Any, Optional
 from dataclasses import dataclass
 from datetime import datetime
+from google.cloud.bigquery import SchemaField
 
 
 # =============================================================================
-# VALID EVENT TYPES (GitHub Archive)
+# KNOWN EVENT TYPES (GitHub Archive)
 # =============================================================================
+# This is a reference list of known GitHub event types for documentation.
+# We use PASS-THROUGH mode - any event type string is accepted without
+# validation. This provides flexibility when GitHub adds new event types.
 VALID_EVENT_TYPES: Set[str] = {
     'PushEvent',
     'CreateEvent',
@@ -130,6 +134,9 @@ OUTPUT_SCHEMA: Dict[str, str] = {
     'payload_distinct_size': 'Int64',
     'payload_head': 'string',
     'payload_before': 'string',
+
+    # Issue fields (from payload.issue.*)
+    'payload_issue_labels': 'object',  # Array of label objects (kept as-is)
 }
 
 
@@ -192,6 +199,15 @@ REPO_FIELD_MAPPING: Dict[str, str] = {
 
 
 # =============================================================================
+# ISSUE FIELD MAPPINGS (payload.issue.*)
+# =============================================================================
+# Fields from nested issue object in payload (2 levels deep: payload.issue.labels)
+ISSUE_FIELD_MAPPING: Dict[str, str] = {
+    'labels': 'payload_issue_labels',  # Array of label objects (kept as object type)
+}
+
+
+# =============================================================================
 # VALIDATION RULES
 # =============================================================================
 @dataclass
@@ -210,13 +226,9 @@ VALIDATION_RULES: List[ValidationRule] = [
     # Event ID validation
     ValidationRule(field='event_id', dtype='string', nullable=False),
 
-    # Event type validation
-    ValidationRule(
-        field='event_type',
-        dtype='string',
-        nullable=False,
-        allowed_values=VALID_EVENT_TYPES
-    ),
+    # Event type - pass-through any string value (GitHub adds new types over time)
+    # We validate dtype but not allowed_values to maintain flexibility
+    ValidationRule(field='event_type', dtype='string', nullable=False),
 
     # Timestamp validation (ISO 8601 format)
     ValidationRule(field='created_at', dtype='string', nullable=False),
@@ -259,10 +271,147 @@ DEFAULT_CONFIG = ProcessingConfig()
 
 
 # =============================================================================
+# BIGQUERY OUTPUT SCHEMA
+# =============================================================================
+# Explicit schema definition for BigQuery table creation using SchemaField class.
+# Maps directly to BigQuery SchemaField format with field name, type, and mode.
+# Reference: https://cloud.google.com/bigquery/docs/schemas
+#
+# Type mappings (pandas -> BigQuery):
+# - 'string' -> 'STRING' (nullable)
+# - 'Int64'   -> 'INT64' (nullable)
+# - 'boolean' -> 'BOOLEAN' (nullable)
+# - 'object'  -> 'STRING' (JSON serialized) or 'JSON' type
+#
+# For the 'object' type (labels), we store as JSON string which can be
+# parsed with JSON_EXTRACT() or PARSE_JSON() functions in BigQuery.
+#
+# Note: This schema is for reference and can be used with:
+# - bq CLI: bq load --schema_file bigquery_schema.json ...
+# - BigQuery API: when creating tables programmatically
+# Our pipeline does NOT load data to BigQuery directly - it writes NDJSON
+# to GCS, which is then loaded to BigQuery separately.
+
+# Schema as SchemaField objects
+BIGQUERY_SCHEMA: List[SchemaField] = [
+    # Event identifiers
+    SchemaField('event_id', 'STRING', mode='NULLABLE', description='Unique event identifier from GitHub Archive'),
+    SchemaField('event_type', 'STRING', mode='NULLABLE', description='Type of GitHub event (PushEvent, IssuesEvent, etc.)'),
+    SchemaField('created_at', 'STRING', mode='NULLABLE', description='Event timestamp (ISO 8601 format)'),
+
+    # Actor fields (from nested actor object)
+    SchemaField('actor_id', 'INT64', mode='NULLABLE', description='GitHub user ID of the actor'),
+    SchemaField('actor_login', 'STRING', mode='NULLABLE', description='Username of the actor'),
+    SchemaField('actor_display_login', 'STRING', mode='NULLABLE', description='Display name of the actor'),
+    SchemaField('actor_gravatar_id', 'STRING', mode='NULLABLE', description='Gravatar hash for actor avatar'),
+    SchemaField('actor_url', 'STRING', mode='NULLABLE', description='GitHub API URL for the actor'),
+    SchemaField('actor_avatar_url', 'STRING', mode='NULLABLE', description='Avatar image URL'),
+    SchemaField('actor_type', 'STRING', mode='NULLABLE', description='Type of user account (if available)'),
+    SchemaField('actor_site_admin', 'BOOLEAN', mode='NULLABLE', description='Whether actor is a site admin'),
+
+    # Repository fields (from nested repo object)
+    SchemaField('repo_id', 'INT64', mode='NULLABLE', description='GitHub repository ID'),
+    SchemaField('repo_name', 'STRING', mode='NULLABLE', description='Repository name (owner/repo)'),
+    SchemaField('repo_url', 'STRING', mode='NULLABLE', description='GitHub API URL for the repository'),
+
+    # Event metadata
+    SchemaField('public', 'BOOLEAN', mode='NULLABLE', description='Whether the event is public'),
+
+    # Payload fields (common across event types)
+    SchemaField('payload_ref', 'STRING', mode='NULLABLE', description='Git reference (branch/tag) from payload'),
+    SchemaField('payload_ref_type', 'STRING', mode='NULLABLE', description='Reference type (branch, tag, etc.)'),
+    SchemaField('payload_push_id', 'INT64', mode='NULLABLE', description='Push event ID'),
+    SchemaField('payload_size', 'INT64', mode='NULLABLE', description='Number of commits in push'),
+    SchemaField('payload_distinct_size', 'INT64', mode='NULLABLE', description='Number of distinct commits'),
+    SchemaField('payload_head', 'STRING', mode='NULLABLE', description='HEAD commit SHA'),
+    SchemaField('payload_before', 'STRING', mode='NULLABLE', description='Before commit SHA'),
+
+    # Issue fields (from payload.issue.*)
+    # Stored as REPEATED RECORD (array of label objects)
+    SchemaField(
+        'payload_issue_labels',
+        'RECORD',
+        mode='REPEATED',
+        fields=[
+            SchemaField('id', 'INT64', description='Label ID'),
+            SchemaField('node_id', 'STRING', description='Label node ID'),
+            SchemaField('url', 'STRING', description='Label URL'),
+            SchemaField('name', 'STRING', description='Label name'),
+            SchemaField('color', 'STRING', description='Label color hex code'),
+            SchemaField('default', 'BOOLEAN', description='Whether this is the default label'),
+            SchemaField('description', 'STRING', description='Label description'),
+        ],
+        description='Issue labels as array of label objects'
+    ),
+]
+
+
+def _schema_field_to_dict(field: SchemaField) -> Dict[str, Any]:
+    """
+    Convert a SchemaField object to a dictionary for JSON serialization.
+    """
+    result = {
+        'name': field.name,
+        'type': field.field_type,
+        'mode': field.mode,
+    }
+    if field.description:
+        result['description'] = field.description
+    if field.fields:
+        result['fields'] = [_schema_field_to_dict(f) for f in field.fields]
+    return result
+
+
+def get_bigquery_schema_json() -> str:
+    """
+    Return the BigQuery schema as a JSON string.
+
+    This can be used directly with:
+    - bq command-line tool: bq load --schema_file schema.json
+    - Terraform google_bigquery_table schema resource
+
+    Returns:
+        JSON string representation of the schema
+    """
+    import json
+
+    schema_dicts = [_schema_field_to_dict(f) for f in BIGQUERY_SCHEMA]
+    return json.dumps(schema_dicts, indent=2)
+
+
+def get_bigquery_schema_fields() -> List[SchemaField]:
+    """
+    Return the BigQuery schema as SchemaField objects for direct API use.
+
+    This can be used directly with:
+    - google.cloud.bigquery.Client.create_table(): Table(table_id, schema=schema)
+    - google.cloud.bigquery.LoadJobConfig: LoadJobConfig(schema=schema)
+
+    Returns:
+        List of SchemaField objects
+
+    Example:
+        from google.cloud import bigquery
+        from src.github_archive.phase2_process_files.schemas.dtype_definitions import get_bigquery_schema_fields
+
+        client = bigquery.Client()
+        schema = get_bigquery_schema_fields()
+        table = bigquery.Table('project.dataset.table', schema=schema)
+        client.create_table(table)
+    """
+    return BIGQUERY_SCHEMA.copy()
+
+
+# =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
 def is_valid_event_type(event_type: str) -> bool:
-    """Check if an event type is valid."""
+    """
+    Check if an event type is in the known list (informational only).
+
+    Note: This is for documentation/reference only. The pipeline uses
+    pass-through mode and accepts any event type string from GitHub Archive.
+    """
     return event_type in VALID_EVENT_TYPES
 
 

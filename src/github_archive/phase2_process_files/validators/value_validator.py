@@ -11,9 +11,8 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 
 
-# Import valid event types from schema definitions
+# Import schema definitions
 from ..schemas.dtype_definitions import (
-    VALID_EVENT_TYPES,
     REQUIRED_FIELDS,
     ACTOR_FIELDS,
     REPO_FIELDS,
@@ -107,59 +106,6 @@ class ValueValidator:
             is_valid=invalid_count == 0,
             valid_df=valid_df if invalid_count > 0 or self.strict_mode else df,
             invalid_count=invalid_count,
-            errors=errors,
-            warnings=warnings
-        )
-
-    def validate_event_types(self, df: pd.DataFrame, type_col: str = 'type') -> ValueValidationResult:
-        """
-        Validate event types against known GitHub event types.
-
-        Args:
-            df: Input dataframe
-            type_col: Column containing event types
-
-        Returns:
-            ValueValidationResult
-        """
-        errors = {}
-        warnings = {}
-        valid_df = df.copy()
-
-        if type_col not in df.columns:
-            errors[type_col] = df.shape[0]
-            return ValueValidationResult(
-                is_valid=False,
-                valid_df=None,
-                invalid_count=df.shape[0],
-                errors=errors,
-                warnings=warnings
-            )
-
-        # Find invalid event types (vectorized)
-        if df[type_col].dtype == 'string':
-            invalid_mask = ~df[type_col].isin(VALID_EVENT_TYPES) & df[type_col].notna()
-        else:
-            # Convert to string for comparison
-            invalid_mask = ~df[type_col].astype(str).isin(VALID_EVENT_TYPES) & df[type_col].notna()
-
-        invalid_count = invalid_mask.sum()
-
-        if invalid_count > 0:
-            errors[type_col] = int(invalid_count)
-
-            # Get the invalid types for warning
-            invalid_types = df.loc[invalid_mask, type_col].value_counts()
-            for evt_type, count in invalid_types.items():
-                warnings[f"unknown_type_{evt_type}"] = int(count)
-
-            # Filter out invalid types
-            valid_df = valid_df[~invalid_mask]
-
-        return ValueValidationResult(
-            is_valid=invalid_count == 0,
-            valid_df=valid_df if invalid_count > 0 or self.strict_mode else df,
-            invalid_count=int(invalid_count),
             errors=errors,
             warnings=warnings
         )
@@ -309,22 +255,6 @@ class ValueValidator:
 
         # Validate required fields
         result = self.validate_required_fields(current_df)
-        all_errors.update(result.errors)
-        all_warnings.update(result.warnings)
-        total_invalid += result.invalid_count
-        current_df = result.valid_df if result.valid_df is not None else current_df
-
-        if current_df.empty:
-            return ValueValidationResult(
-                is_valid=False,
-                valid_df=None,
-                invalid_count=df.shape[0],
-                errors=all_errors,
-                warnings=all_warnings
-            )
-
-        # Validate event types
-        result = self.validate_event_types(current_df)
         all_errors.update(result.errors)
         all_warnings.update(result.warnings)
         total_invalid += result.invalid_count

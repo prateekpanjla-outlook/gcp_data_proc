@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from ..schemas.dtype_definitions import (
     ACTOR_FIELD_MAPPING,
     REPO_FIELD_MAPPING,
+    ISSUE_FIELD_MAPPING,
 )
 
 
@@ -152,6 +153,9 @@ class GitHubEventTransformer:
         result = self._merge_extracted(result, df, ['repo'], REPO_FIELD_MAPPING)
         result = self._merge_extracted(result, df, ['payload'], PAYLOAD_FIELD_MAPPING)
 
+        # Extract deeply nested fields (e.g., payload.issue.labels)
+        result = self._merge_extracted_nested(result, df, ['payload', 'issue'], ISSUE_FIELD_MAPPING)
+
         return result
 
     def _merge_extracted(
@@ -178,11 +182,77 @@ class GitHubEventTransformer:
 
         return result
 
+    def _merge_extracted_nested(
+        self,
+        result: pd.DataFrame,
+        source_df: pd.DataFrame,
+        path_parts: List[str],
+        field_mapping: Dict[str, str]
+    ) -> pd.DataFrame:
+        """
+        Merge extracted fields from nested path (e.g., payload.issue.labels).
+
+        Navigates multiple levels of nesting to extract fields.
+
+        Args:
+            result: Result dataframe to add fields to
+            source_df: Source dataframe with nested data
+            path_parts: List of keys to navigate (e.g., ['payload', 'issue'])
+            field_mapping: Mapping of final field name to target column name
+
+        Returns:
+            Dataframe with extracted nested fields
+        """
+        if not path_parts or path_parts[0] not in source_df.columns:
+            # Add empty columns for all mapped fields
+            for target_field in field_mapping.values():
+                if target_field not in result.columns:
+                    result[target_field] = None
+            return result
+
+        # Navigate the nested path step by step
+        current_data = source_df[path_parts[0]]
+        for part in path_parts[1:]:
+            current_data = current_data.apply(
+                lambda x: self._safe_get(x, part) if isinstance(x, dict) else None
+            )
+
+        # Extract fields from the final nested object
+        for source_field, target_field in field_mapping.items():
+            if target_field not in result.columns:
+                result[target_field] = current_data.apply(
+                    lambda x: self._safe_get(x, source_field) if isinstance(x, dict) else None
+                )
+
+        return result
+
     def _safe_get(self, obj: Any, field: str, default: Any = None) -> Any:
         """Safely get a field from a dictionary."""
         if isinstance(obj, dict):
             return obj.get(field, default)
         return default
+
+    def _safe_get_nested(self, obj: Any, keys: List[str], default: Any = None) -> Any:
+        """
+        Safely get a nested field from a dictionary using a list of keys.
+
+        Args:
+            obj: The object to traverse (typically a dict)
+            keys: List of keys to traverse in order (e.g., ['issue', 'labels'])
+            default: Default value if any key in path is missing
+
+        Returns:
+            The value at the nested path, or default if path doesn't exist
+        """
+        if not isinstance(obj, dict):
+            return default
+
+        current = obj
+        for key in keys:
+            if not isinstance(current, dict) or key not in current:
+                return default
+            current = current[key]
+        return current
 
     def transform_chunk(self, df: pd.DataFrame) -> TransformationResult:
         """
