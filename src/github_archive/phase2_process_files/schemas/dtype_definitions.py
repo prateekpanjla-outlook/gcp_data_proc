@@ -55,14 +55,19 @@ GITHUB_EVENT_DTYPES: Dict[str, str] = {
 # =============================================================================
 # ACTOR FIELD DEFINITIONS
 # =============================================================================
+# Based on actual GitHub Archive data analysis (1000+ records)
+# Core fields: id, login, display_login, gravatar_id, url, avatar_url
+# Note: 'type' and 'site_admin' are in GitHub API spec but not typically in GH Archive
 ACTOR_FIELDS: Dict[str, str] = {
     'actor_id': 'int64',
     'actor_login': 'string',
-    'actor_avatar_url': 'string',
+    'actor_display_login': 'string',  # Present in 100% of GH Archive records
     'actor_gravatar_id': 'string',
-    'actor_type': 'string',
     'actor_url': 'string',
-    'actor_site_admin': 'boolean',
+    'actor_avatar_url': 'string',
+    # Optional fields (GitHub API spec but rarely/never in GH Archive)
+    'actor_type': 'string',  # Optional
+    'actor_site_admin': 'boolean',  # Optional
 }
 
 
@@ -88,10 +93,12 @@ OUTPUT_SCHEMA: Dict[str, str] = {
     # Actor fields
     'actor_id': 'int64',
     'actor_login': 'string',
-    'actor_avatar_url': 'string',
+    'actor_display_login': 'string',
     'actor_gravatar_id': 'string',
-    'actor_type': 'string',
     'actor_url': 'string',
+    'actor_avatar_url': 'string',
+    # Optional (GitHub API spec but rarely in GH Archive)
+    'actor_type': 'string',
     'actor_site_admin': 'boolean',
 
     # Repository fields
@@ -154,10 +161,12 @@ REQUIRED_FIELDS: List[str] = [
 ACTOR_FIELD_MAPPING: Dict[str, str] = {
     'id': 'actor_id',
     'login': 'actor_login',
-    'avatar_url': 'actor_avatar_url',
+    'display_login': 'actor_display_login',
     'gravatar_id': 'actor_gravatar_id',
-    'type': 'actor_type',
     'url': 'actor_url',
+    'avatar_url': 'actor_avatar_url',
+    # Optional fields (GitHub API spec but rarely in GH Archive)
+    'type': 'actor_type',
     'site_admin': 'actor_site_admin',
 }
 

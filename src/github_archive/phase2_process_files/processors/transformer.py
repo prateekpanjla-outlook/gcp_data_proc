@@ -9,6 +9,12 @@ import json
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 
+# Import field mappings from source of truth
+from ..schemas.dtype_definitions import (
+    ACTOR_FIELD_MAPPING,
+    REPO_FIELD_MAPPING,
+)
+
 
 # =============================================================================
 # TRANSFORMATION RESULT
@@ -23,24 +29,8 @@ class TransformationResult:
 
 
 # =============================================================================
-# FIELD MAPPINGS
+# PAYLOAD FIELD MAPPING (not in dtype_definitions as it varies by event type)
 # =============================================================================
-ACTOR_FIELD_MAPPING = {
-    'id': 'actor_id',
-    'login': 'actor_login',
-    'avatar_url': 'actor_avatar_url',
-    'gravatar_id': 'actor_gravatar_id',
-    'type': 'actor_type',
-    'url': 'actor_url',
-    'site_admin': 'actor_site_admin',
-}
-
-REPO_FIELD_MAPPING = {
-    'id': 'repo_id',
-    'name': 'repo_name',
-    'url': 'repo_url',
-}
-
 PAYLOAD_FIELD_MAPPING = {
     'ref': 'payload_ref',
     'ref_type': 'payload_ref_type',
@@ -236,7 +226,7 @@ class GitHubEventTransformer:
         # String columns
         string_cols = [
             'event_id', 'event_type', 'created_at',
-            'actor_login', 'actor_avatar_url', 'actor_gravatar_id',
+            'actor_login', 'actor_display_login', 'actor_avatar_url', 'actor_gravatar_id',
             'actor_type', 'actor_url',
             'repo_name', 'repo_url',
             'payload_ref', 'payload_ref_type',

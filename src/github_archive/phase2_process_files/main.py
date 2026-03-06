@@ -12,12 +12,9 @@ from typing import Dict, Any
 
 from flask import Flask, request, jsonify
 from google.cloud import error_reporting
-import google.auth.transport.requests
-import google.oauth2.id_token
 
-from .processors.file_processor import GitHubArchiveFileProcessor, FileProcessingResult
-from .utils.logger import Phase2Logger, log_structured
-from .utils.gcs_client import GCSPath
+from .processors.file_processor import GitHubArchiveFileProcessor
+from .utils.logger import Phase2Logger
 
 
 # =============================================================================
@@ -116,20 +113,6 @@ def process_file_event() -> tuple[Dict[str, Any], int]:
     """
     start_time = time.time()
 
-    # Verify request is from Google Cloud
-    try:
-        auth_request = google.auth.transport.requests.Request()
-        id_token.verify_oauth2_token(
-            request.headers.get('Authorization').replace('Bearer ', ''),
-            auth_request,
-            audience=f'https://{PROJECT_ID}.{os.getenv("REGION", "us-central1")}.run.app'
-        )
-    except Exception as e:
-        logger.warning(f"Authentication failed: {e}")
-        # For local testing, continue without auth
-        if os.getenv('LOCAL_DEV') != 'true':
-            return jsonify({'error': 'Authentication failed'}), 401
-
     # Parse event payload
     try:
         event = request.get_json()
@@ -143,34 +126,12 @@ def process_file_event() -> tuple[Dict[str, Any], int]:
     # Extract event data
     bucket = event.get('bucket')
     file_name = event.get('name')
-    resource_state = event.get('resourceState')
 
     logger.info(
         "Received Eventarc event",
         bucket=bucket,
-        file_name=file_name,
-        resource_state=resource_state
+        file_name=file_name
     )
-
-    # Validate this is for our landing bucket
-    if bucket != os.path.basename(LANDING_BUCKET):
-        logger.warning(f"Event for wrong bucket: {bucket}, expected {LANDING_BUCKET}")
-        return jsonify({'status': 'ignored', 'reason': 'wrong bucket'}), 200
-
-    # Only process on finalize
-    if resource_state == 'not_exists':
-        logger.info(f"File deleted, ignoring: {file_name}")
-        return jsonify({'status': 'ignored', 'reason': 'file deleted'}), 200
-
-    # Check file path (only process raw/ files, not chunks/)
-    # Chunks are processed by a separate trigger
-    if '/chunks/' in file_name:
-        logger.info(f"Chunk file, will be processed by chunk processor: {file_name}")
-        return jsonify({'status': 'ignored', 'reason': 'chunk file'}), 200
-
-    if not file_name.endswith('.json.gz'):
-        logger.warning(f"Invalid file type: {file_name}")
-        return jsonify({'status': 'ignored', 'reason': 'invalid file type'}), 200
 
     # Build full GCS path
     input_gcs_path = f"gs://{bucket}/{file_name}"
@@ -308,18 +269,6 @@ def process_manual() -> tuple[Dict[str, Any], int]:
         if error_reporter:
             error_reporter.report_exception()
         return jsonify({'error': str(e)}), 500
-
-
-# =============================================================================
-# METRICS ENDPOINT
-# =============================================================================
-@app.route('/metrics', methods=['GET'])
-def get_metrics() -> tuple[Dict[str, Any], int]:
-    """Get processing metrics."""
-    metrics = processor.get_metrics()
-    metrics_dict = metrics.to_dict()
-    processor.reset_metrics()
-    return jsonify(metrics_dict), 200
 
 
 # =============================================================================

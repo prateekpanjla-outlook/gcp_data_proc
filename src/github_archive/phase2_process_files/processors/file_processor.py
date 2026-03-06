@@ -8,23 +8,18 @@ Uses Pandas with chunked processing for memory efficiency.
 import os
 import tempfile
 import time
-from typing import Dict, List, Any, Optional
+from typing import List, Optional
 from dataclasses import dataclass
 
-try:
-    import pandas as pd
-    PANDAS_AVAILABLE = True
-except ImportError:
-    PANDAS_AVAILABLE = False
+import pandas as pd
 
-from ..schemas.dtype_definitions import DEFAULT_CONFIG
-from ..validators.file_validator import FileValidator, should_split_file
+from ..validators.file_validator import validate_file, should_split_file
 from ..validators.dtype_validator import DtypeValidator
 from ..validators.value_validator import ValueValidator
 from ..processors.transformer import GitHubEventTransformer
-from ..writers.ndjson_writer import NDJSONWriter, GCSNDJSONWriter, create_output_path
-from ..utils.gcs_client import GCSClient, read_pandas_dataframe_from_gcs
-from ..utils.logger import Phase2Logger, ProcessingMetrics
+from ..writers.ndjson_writer import GCSNDJSONWriter, create_output_path
+from ..utils.gcs_client import GCSClient
+from ..utils.logger import Phase2Logger
 
 
 # =============================================================================
@@ -93,14 +88,10 @@ class GitHubArchiveFileProcessor:
 
         # Initialize components
         self.logger = logger or Phase2Logger(component='file-processor', project_id=self.project_id)
-        self.file_validator = FileValidator()
         self.dtype_validator = DtypeValidator()
         self.value_validator = ValueValidator()
         self.transformer = GitHubEventTransformer()
         self.gcs_client = GCSClient(project_id=self.project_id)
-
-        # Metrics
-        self.metrics = ProcessingMetrics()
 
     def process_file(
         self,
@@ -118,7 +109,6 @@ class GitHubArchiveFileProcessor:
             FileProcessingResult with processing statistics
         """
         start_time = time.time()
-        self.metrics.start_time = time.time()
 
         # Extract file name from path
         from ..utils.gcs_client import GCSPath
@@ -143,8 +133,8 @@ class GitHubArchiveFileProcessor:
                 error_message=str(e)
             )
 
-        # Validate file
-        validation_result = self.file_validator.validate_file_name(file_name)
+        # Validate file (name format and size)
+        validation_result = validate_file(file_name, metadata.size)
         if not validation_result.is_valid:
             error_msg = '; '.join(validation_result.errors)
             self.logger.log_file_error(file_name, f"File validation failed: {error_msg}")
@@ -200,13 +190,6 @@ class GitHubArchiveFileProcessor:
         try:
             result = self._process_with_pandas(input_gcs_path, output_gcs_path, file_name)
 
-            # Update metrics
-            self.metrics.files_processed += 1
-            self.metrics.total_records_in += result.records_in
-            self.metrics.total_records_out += result.records_out
-            self.metrics.total_errors += result.errors
-            self.metrics.total_duration_seconds += result.duration_seconds
-
             # Log completion
             self.logger.log_file_complete(
                 file_name,
@@ -252,9 +235,6 @@ class GitHubArchiveFileProcessor:
         Returns:
             FileProcessingResult with multiple output files
         """
-        if not PANDAS_AVAILABLE:
-            raise ImportError("Pandas is required for processing")
-
         start_time = time.time()
         total_records_in = 0
         total_records_out = 0
@@ -361,15 +341,6 @@ class GitHubArchiveFileProcessor:
             warnings=total_warnings,
             duration_seconds=duration
         )
-
-    def get_metrics(self) -> ProcessingMetrics:
-        """Get current processing metrics."""
-        self.metrics.end_time = time.time()
-        return self.metrics
-
-    def reset_metrics(self) -> None:
-        """Reset processing metrics."""
-        self.metrics = ProcessingMetrics()
 
 
 # =============================================================================
