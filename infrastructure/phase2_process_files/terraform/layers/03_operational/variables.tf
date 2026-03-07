@@ -21,11 +21,6 @@ variable "environment" {
   }
 }
 
-variable "terraform_state_bucket" {
-  description = "GCS bucket for Terraform state (for accessing remote state)"
-  type        = string
-}
-
 variable "image_tag" {
   description = "Docker image tag to deploy"
   type        = string
@@ -46,7 +41,7 @@ variable "file_size_threshold_mb" {
 variable "processor_memory" {
   description = "Memory for processor service (in GiB)"
   type        = number
-  default     = 8
+  default     = 2
 
   validation {
     condition     = var.processor_memory >= 1 && var.processor_memory <= 32
@@ -57,7 +52,7 @@ variable "processor_memory" {
 variable "processor_cpu" {
   description = "CPU for processor service"
   type        = number
-  default     = 4
+  default     = 1
 
   validation {
     condition     = var.processor_cpu >= 1 && var.processor_cpu <= 8
@@ -68,21 +63,21 @@ variable "processor_cpu" {
 variable "max_instances" {
   description = "Maximum number of Cloud Run instances"
   type        = number
-  default     = 100
+  default     = 5
 
   validation {
-    condition     = var.max_instances >= 1 && var.max_instances <= 1000
-    error_message = "Max instances must be between 1 and 1000"
+    condition     = var.max_instances >= 1 && var.max_instances <= 100
+    error_message = "Max instances must be between 1 and 100"
   }
 }
 
 variable "chunksize" {
   description = "Number of records per chunk for processing"
   type        = number
-  default     = 100_000
+  default     = 100000
 
   validation {
-    condition     = var.chunksize >= 10_000 && var.chunksize <= 1_000_000
+    condition     = var.chunksize >= 10000 && var.chunksize <= 1000000
     error_message = "Chunksize must be between 10,000 and 1,000,000"
   }
 }
