@@ -4,17 +4,17 @@
 graph TD
     Start([Phase 2 Start]) --> Input["Input File<br>gs://landing/raw/{YYYY-MM-DD-HH}.json.gz"]
 
-    Input --> EventArc[Eventarc Trigger #1<br>finalize event on raw/]
+    Input --> EventArc[Eventarc Trigger<br>finalize event]
 
-    EventArc --> CR[Cloud Run Service<br>github-archive-processor]
+    EventArc --> CR[Cloud Run Service<br>github-archive-processor<br>Path filtering: raw/ or chunks/]
 
     CR --> SizeCheck{File Size<br>Check}
 
     SizeCheck -->|< 500MB| Direct[Direct Processing<br>process_file_chunked]
     SizeCheck -->|>= 500MB| Split[File Splitting<br>file_splitter Job]
 
-    Split --> Chunks["Create Chunks<br>raw/chunks/{file}-chunk-{N}.json.gz"]
-    Chunks --> ChunkEvents[Eventarc Trigger #2<br>finalize event on chunks/]
+    Split --> Chunks["Create Chunks<br>landing/chunks/{file}-chunk-{N:03d}.json.gz"]
+    Chunks --> ChunkEvents[Eventarc Trigger<br>finalize event on chunks/]
     ChunkEvents --> ChunkProcess[process_chunk<br>for each chunk]
 
     Direct --> Validate[Schema Validation<br>Pandas Chunked Processing]
@@ -39,4 +39,4 @@ graph TD
     style Stage fill:#c8e6c9
 ```
 
-**Note:** Phase 2 processes files from Phase 1 landing zone and outputs to staging zone in NDJSON format. Uses Pandas with chunked processing for memory-efficient validation. Uses **direct events only** - no Pub/Sub costs.
+**Note:** Phase 2 processes files from Phase 1 landing zone and outputs to staging zone in NDJSON format. Uses Pandas with chunked processing for memory-efficient validation. Uses **single Cloud Run service** with path filtering for both raw/ and chunks/ files - no Pub/Sub costs.

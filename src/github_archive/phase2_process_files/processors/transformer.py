@@ -10,7 +10,7 @@ from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 
 # Import field mappings from source of truth
-from ..schemas.dtype_definitions import (
+from schemas.dtype_definitions import (
     ACTOR_FIELD_MAPPING,
     REPO_FIELD_MAPPING,
     ISSUE_FIELD_MAPPING,

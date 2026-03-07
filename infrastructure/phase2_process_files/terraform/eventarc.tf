@@ -32,6 +32,10 @@ resource "google_eventarc_trigger" "main_file_processor" {
 
   service_account = google_service_account.eventarc_invoker.email
 
+  retry_policy {
+    max_attempts = 2
+  }
+
   depends_on = [
     google_project_service.phase2_apis,
     google_project_iam_member.storage_pubsub_publisher,
@@ -72,6 +76,10 @@ resource "google_eventarc_trigger" "chunk_processor" {
   }
 
   service_account = google_service_account.eventarc_invoker.email
+
+  retry_policy {
+    max_attempts = 2
+  }
 
   depends_on = [
     google_project_service.phase2_apis,

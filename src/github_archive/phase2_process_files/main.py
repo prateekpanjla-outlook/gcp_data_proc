@@ -13,8 +13,8 @@ from typing import Dict, Any
 from flask import Flask, request, jsonify
 from google.cloud import error_reporting
 
-from .processors.file_processor import GitHubArchiveFileProcessor
-from .utils.logger import Phase2Logger
+from processors.file_processor import GitHubArchiveFileProcessor
+from utils.logger import Phase2Logger
 
 
 # =============================================================================
@@ -133,6 +133,21 @@ def process_file_event() -> tuple[Dict[str, Any], int]:
         file_name=file_name
     )
 
+    # Path filtering: Only process files in github-archive/raw/ or github-archive/chunks/
+    # Eventarc triggers don't support 'name' attribute filtering for Cloud Storage events
+    if not file_name or not file_name.startswith('github-archive/'):
+        logger.info(f"Ignoring file outside github-archive/ path: {file_name}")
+        return jsonify({'status': 'ignored', 'reason': 'path_not_matching'}), 200
+
+    if not file_name.endswith('.json.gz'):
+        logger.info(f"Ignoring non-.json.gz file: {file_name}")
+        return jsonify({'status': 'ignored', 'reason': 'extension_not_matching'}), 200
+
+    # Validate path patterns: raw/ or chunks/ subdirectories
+    if not ('/raw/' in file_name or '/chunks/' in file_name):
+        logger.info(f"Ignoring file not in raw/ or chunks/ path: {file_name}")
+        return jsonify({'status': 'ignored', 'reason': 'subdirectory_not_matching'}), 200
+
     # Build full GCS path
     input_gcs_path = f"gs://{bucket}/{file_name}"
 
@@ -146,7 +161,7 @@ def process_file_event() -> tuple[Dict[str, Any], int]:
         if result.error_message == 'FILE_SPLIT_REQUIRED':
             # Trigger file splitter job
             from google.cloud import run_v2
-            from .processors.file_splitter import run_splitter_job
+            from processors.file_splitter import run_splitter_job
 
             logger.info(f"Triggering file splitter for: {file_name}")
 

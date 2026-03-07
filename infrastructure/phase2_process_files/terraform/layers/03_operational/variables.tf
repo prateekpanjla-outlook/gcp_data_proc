@@ -41,7 +41,7 @@ variable "file_size_threshold_mb" {
 variable "processor_memory" {
   description = "Memory for processor service (in GiB)"
   type        = number
-  default     = 2
+  default     = 4
 
   validation {
     condition     = var.processor_memory >= 1 && var.processor_memory <= 32
@@ -52,7 +52,7 @@ variable "processor_memory" {
 variable "processor_cpu" {
   description = "CPU for processor service"
   type        = number
-  default     = 1
+  default     = 2
 
   validation {
     condition     = var.processor_cpu >= 1 && var.processor_cpu <= 8

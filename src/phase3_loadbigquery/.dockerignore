@@ -1,0 +1,35 @@
+# .dockerignore for Phase 3 BigQuery Loader
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local files
+*.local
+local_testing/
+tmp/
+
+# Git
+.git/
+.gitignore

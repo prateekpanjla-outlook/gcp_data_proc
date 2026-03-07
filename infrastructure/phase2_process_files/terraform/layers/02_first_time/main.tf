@@ -11,11 +11,11 @@ terraform {
     }
   }
 
-  backend "gcs" {
-    bucket         = "REPLACE_WITH_TERRAFORM_STATE_BUCKET"
-    prefix         = "terraform/state/phase2-first-time"
-    skip_bucket_versioning = false
-  }
+  # backend "gcs" {
+  #   bucket         = "REPLACE_WITH_TERRAFORM_STATE_BUCKET"
+  #   prefix         = "terraform/state/phase2-first-time"
+  # }
+  # Using local backend for development
 }
 
 provider "google" {
@@ -92,6 +92,32 @@ resource "google_project_service" "monitoring" {
   project            = var.project_id
   service            = "monitoring.googleapis.com"
   disable_on_destroy = false
+}
+
+# =============================================================================
+# IAM: Service Agents (depends on APIs enabled above)
+# =============================================================================
+# Cloud Storage service agent to publish events (for Eventarc)
+resource "google_project_iam_member" "storage_pubsub_publisher" {
+  project = var.project_id
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:service-${data.google_project.current.number}@gs-project-accounts.iam.gserviceaccount.com"
+
+  depends_on = [
+    google_project_service.storage,
+    google_project_service.eventarc,
+  ]
+}
+
+# Eventarc service agent
+resource "google_project_iam_member" "eventarc_event_receiver" {
+  project = var.project_id
+  role    = "roles/eventarc.eventReceiver"
+  member  = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-eventarc.iam.gserviceaccount.com"
+
+  depends_on = [
+    google_project_service.eventarc,
+  ]
 }
 
 # =============================================================================

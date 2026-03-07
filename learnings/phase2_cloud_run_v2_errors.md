@@ -1027,3 +1027,138 @@ gcloud logging tail "resource.type=cloud_run_revision" --filter="resource.labels
 
 **Reference:**
 [Eventarc Docs - Grant Cloud Run service permissions](https://cloud.google.com/eventarc/docs/roles-permissions#invoker-role)
+
+---
+
+## Error 18: Eventarc Trigger - Pub/Sub Service Agent Token Creator Missing
+
+**Error Message (Console):**
+```
+Cloud Pub/Sub needs the role roles/iam.serviceAccountTokenCreator granted to service account
+service-PROJECT_NUMBER@gcp-sa-pubsub.iam.gserviceaccount.com on this project to create identity tokens.
+You can change this later.
+```
+
+**Eventarc Trigger Creation Output:**
+```
+⠧ Creating Eventarc trigger... [Running]
+✅ Created trigger [TRIGGER_NAME]
+⚠️  Warning: Pub/Sub service agent needs additional permissions
+```
+
+**Root Cause:**
+When creating an Eventarc trigger for an **authenticated Cloud Run service**, the Pub/Sub service agent needs to generate OpenID Connect (OIDC) tokens to authenticate to Cloud Run. This requires the `roles/iam.serviceAccountTokenCreator` role on the Eventarc invoker service account.
+
+The error appears as a **warning** during trigger creation - the trigger is created but **won't work** until the permission is granted.
+
+**Why This Permission is Needed:**
+```
+┌─────────────┐         ┌──────────────┐          ┌──────────────┐
+│  GCS Bucket │ ───────→ │   Pub/Sub    │ ────────→ │  Cloud Run   │
+│   (event)   │         │  (push mode) │  (token) │   (service)  │
+└─────────────┘         └──────────────┘          └──────────────┘
+                              ↓
+                    Generate OIDC token
+                    for Eventarc invoker SA
+                              ↓
+                    Need: iam.serviceAccountTokenCreator
+```
+
+**Fix:**
+
+**Option A: Grant via gcloud (quick fix)**
+```bash
+# Get project number
+PROJECT_NUMBER=$(gcloud projects describe PROJECT_ID --format='value(projectNumber)')
+
+# Grant the Pub/Sub service agent permission to create tokens for Eventarc invoker SA
+gcloud iam service-accounts add-iam-policy-binding \
+  dev-eventarc-invoker@PROJECT_ID.iam.gserviceaccount.com \
+  --member="serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com" \
+  --role="roles/iam.serviceAccountTokenCreator" \
+  --project=PROJECT_ID
+```
+
+**Option B: Add to Terraform Layer 01 (static resources)**
+```hcl
+# Get project number from data source
+data "google_project" "current" {}
+
+# Pub/Sub service agent: Token creator on Eventarc invoker SA
+resource "google_service_account_iam_member" "pubsub_token_creator_eventarc_invoker" {
+  service_account_id = google_service_account.eventarc_invoker.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+
+  depends_on = [
+    google_project_service.eventarc,
+    google_project_service.pubsub,
+  ]
+}
+```
+
+**Option C: Allow unauthenticated invocations (NOT recommended for production)**
+```hcl
+# Only for testing! Allows anyone on the internet to invoke
+resource "google_cloud_run_v2_service" "processor" {
+  # ...
+  template {
+    # ...
+  }
+  ingress = "INGRESS_TRAFFIC_ALL"  # Allows public traffic
+}
+
+# Grant allUsers access
+resource "google_cloud_run_v2_service_iam_member" "public_access" {
+  location = google_cloud_run_v2_service.processor.location
+  project  = google_cloud_run_v2_service.processor.project
+  name     = google_cloud_run_v2_service.processor.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+```
+
+**Important Notes:**
+
+1. **This is SERVICE ACCOUNT IAM, not project IAM** - The permission is granted on the service account itself, not on the project/bucket/resource.
+
+2. **The member is the Pub/Sub service agent, not the Eventarc invoker** - You're granting TO the Pub/Sub SA, ON the Eventarc invoker SA.
+
+3. **Trigger shows as "Active" even without this permission** - The trigger is created successfully, but events will fail with authentication errors until you grant this role.
+
+4. **Cross-project triggers need additional setup** - If Pub/Sub is in a different project than Cloud Run, you also need:
+   - `roles/iam.serviceAccountTokenCreator` on the Cloud Run service account
+   - The Eventarc invoker SA from the source project
+
+**Verification:**
+```bash
+# Check if Pub/Sub SA has token creator role on Eventarc invoker SA
+gcloud iam service-accounts get-iam-policy \
+  dev-eventarc-invoker@PROJECT_ID.iam.gserviceaccount.com \
+  --project=PROJECT_ID \
+  --format="json(etag,bindings)" | jq '.bindings[] | select(.role=="roles/iam.serviceAccountTokenCreator")'
+
+# Should show:
+# {
+#   "role": "roles/iam.serviceAccountTokenCreator",
+#   "members": [
+#     "serviceAccount:service-PROJECT_NUMBER@gcp-sa-pubsub.iam.gserviceaccount.com"
+#   ]
+# }
+```
+
+**Related Errors:**
+- **Error 17**: Missing `roles/run.invoker` on Cloud Run service
+- **Error 12**: Missing `roles/eventarc.eventReceiver` on Eventarc invoker SA
+
+**Required IAM Summary for Eventarc → Authenticated Cloud Run:**
+
+| Grant To | Role | On Target | Purpose |
+|----------|------|-----------|---------|
+| `service-NUMBER@gcp-sa-pubsub.iam.gserviceaccount.com` | `roles/iam.serviceAccountTokenCreator` | Eventarc Invoker SA | Generate OIDC tokens for authentication |
+| Eventarc Invoker SA | `roles/run.invoker` | Cloud Run Service | Invoke the Cloud Run service |
+| Eventarc Invoker SA | `roles/eventarc.eventReceiver` | Project | Receive events from Eventarc |
+
+**Reference:**
+[Pub/Sub Push Authentication](https://cloud.google.com/pubsub/docs/push#authentication_and_authorization)
+[Eventarc Security](https://cloud.google.com/eventarc/docs/securing-targets)

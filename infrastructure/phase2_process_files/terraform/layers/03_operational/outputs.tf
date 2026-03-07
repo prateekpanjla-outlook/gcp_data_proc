@@ -10,14 +10,9 @@ output "processor_service_name" {
   value       = google_cloud_run_v2_service.processor.name
 }
 
-output "main_file_trigger_name" {
-  description = "Name of the main file Eventarc trigger"
-  value       = google_eventarc_trigger.main_file_processor.name
-}
-
-output "chunk_trigger_name" {
-  description = "Name of the chunk Eventarc trigger"
-  value       = google_eventarc_trigger.chunk_processor.name
+output "storage_trigger_name" {
+  description = "Name of the Eventarc trigger for storage events"
+  value       = google_eventarc_trigger.storage_events.name
 }
 
 output "image_deployed" {

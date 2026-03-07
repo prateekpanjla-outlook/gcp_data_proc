@@ -14,6 +14,7 @@ google-cloud-bigquery>=3.0.0
 # Web framework
 Flask>=3.0.0,<4.0.0
 Werkzeug>=3.0.0,<4.0.0
+gunicorn>=21.2.0,<24.0.0
 
 # Google Auth
 google-auth>=2.23.0,<3.0.0

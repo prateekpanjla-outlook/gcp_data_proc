@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 
 # Import schema definitions
-from ..schemas.dtype_definitions import (
+from schemas.dtype_definitions import (
     REQUIRED_FIELDS,
     ACTOR_FIELDS,
     REPO_FIELDS,

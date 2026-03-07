@@ -127,11 +127,16 @@ src/github_archive/phase2_process_files/
 
 ## Processing Flow Summary
 
-1. **Eventarc** triggers `main.py` when new file lands in landing bucket
-2. **main.py** calls `file_processor.process_file()`
+1. **Eventarc** triggers `main.py` when new file lands in landing bucket (raw/ or chunks/)
+2. **main.py** performs path filtering (`/raw/` vs `/chunks/`) and calls `file_processor.process_file()`
 3. **file_validator** checks filename pattern and size
-4. If file to threshold to **file_splitter** splits into chunks
-5. **dtype_validator** validates DataFrame column types
-6. **value_validator** checks business rules (event types, required fields)
+4. If file >= threshold, **file_splitter** splits into chunks in landing/chunks/
+5. **dtype_validator** validates/coerces DataFrame column types (string, Int64, boolean, object)
+6. **value_validator** checks business rules (required fields, timestamps) - **event types use pass-through mode**
 7. **transformer** flattens nested JSON to output schema
 8. **ndjson_writer** streams output to staging bucket in GCS
+
+**Architecture Notes:**
+- Single Cloud Run service handles both raw files and chunks via path filtering in Flask
+- Event types are NOT validated against a whitelist (pass-through mode for flexibility)
+- No DLQ - errors are logged to Cloud Logging

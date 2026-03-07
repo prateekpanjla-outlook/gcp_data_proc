@@ -40,10 +40,12 @@ graph TD
 **Chunk Filename Convention:**
 
 ```
-{original-basename}-chunk-{chunk_number:03d}-of-{total_chunks:03d}-{event_count}.json.gz
+{original-basename}-chunk-{chunk_number:03d}.json.gz
 
-Example: 2026-03-05-12-chunk-001-of-012-10000.json.gz
+Example: 2026-03-05-12-chunk-001.json.gz
 ```
+
+**Note:** The simplified format doesn't include total chunk count or event count in the filename. This keeps chunk processing stateless.
 
 **File Splitter Job Specification:**
 
@@ -79,28 +81,25 @@ resource "google_cloud_run_v2_job" "file_splitter" {
 │                              CHUNK PROCESSING ORCHESTRATION (Direct Events)                                  │
 ├─────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                                             │
-│   File Splitter writes N chunks to GCS → Cloud Storage emits N direct events → N Cloud Run Tasks (parallel)  │
+│   File Splitter writes N chunks to GCS → Cloud Storage emits N direct events → Single Cloud Run Service    │
 │                                                                                                             │
 │   Flow:                                                                                                      │
 │   ┌─────────────────────────────────────────────────────────────────────────────────────────────────────┐   │
 │   │ 1. File Splitter uploads chunk to:                                                                  │   │
-│   │    gs://.../chunks/2026-03-05-12-chunk-001-of-012-10000.json.gz                                    │   │
+│   │    gs://.../chunks/2026-03-05-12-chunk-001.json.gz                                                  │   │
 │   │                                                                                                      │   │
 │   │ 2. Cloud Storage emits finalize event                                                               │   │
 │   │                                                                                                      │   │
-│   │ 3. Eventarc Trigger #2 (filtered for chunks/) routes to Cloud Run chunk processor                    │   │
+│   │ 3. Eventarc Trigger (filtered for github-archive/*.json.gz) routes to Cloud Run Service             │   │
 │   │                                                                                                      │   │
-│   │ 4. Chunk processor extracts metadata from filename:                                                 │   │
-│   │    - Original file: 2026-03-05-12                                                                    │   │
-│   │    - Chunk number: 001 of 012                                                                       │   │
-│   │    - Event count: 10000                                                                             │   │
+│   │ 4. Flask handler checks path: if /chunks/ in filename, process as chunk                             │   │
 │   │                                                                                                      │   │
 │   │ 5. Process chunk → Write to staging bucket                                                      │   │
 │   └─────────────────────────────────────────────────────────────────────────────────────────────────────┘   │
 │                                                                                                             │
 │   Benefits:                                                                                                  │
 │   • No Pub/Sub costs                                                                                        │
-│   • Simpler architecture (no topic/subscription management)                                                │
+│   • Simpler architecture (single service)                                                                   │
 │   • File is the source of truth                                                                             │
 │   • Same latency as Pub/Sub (both use direct events)                                                        │
 │                                                                                                             │

@@ -5,7 +5,7 @@ graph TB
     Input([Input File]) --> L1{Layer 1:<br>File Validation}
 
     L1 -->|Pass| L2{Layer 2:<br>Pandas JSON Parsing}
-    L1 -->|Fail| Invalid[Move to invalid-files/]
+    L1 -->|Fail| Invalid[Log error<br>Return failure]
 
     L2 -->|Pass| L3{Layer 3:<br>Dtype Validation}
     L2 -->|Fail| Skip[Skip line<br>Count error]
@@ -14,15 +14,15 @@ graph TB
     L3 -->|Fail| NaN[Set to NaN<br>Count error]
 
     L4 -->|Pass| L5{Layer 5:<br>Business Rules}
-    L4 -->|Fail| Filter[Filter out<br>Move to DLQ]
+    L4 -->|Fail| Filter[Filter out<br>Log warning]
 
     L5 -->|Pass| Output([Valid Event])
-    L5 -->|Fail| DLQ[Move to DLQ<br>gs://dlq/events/]
+    L5 -->|Fail| LogBiz[Log warning<br>Continue processing]
 
     style Input fill:#e3f2fd
     style Output fill:#e1f5e1
     style Invalid fill:#ffebee
-    style DLQ fill:#fff3e0
+    style LogBiz fill:#fff3e0
     style Skip fill:#fff3e0
     style L2 fill:#e8f5e9
     style L3 fill:#e8f5e9
@@ -33,11 +33,13 @@ graph TB
 
 | Layer | What | Tools | Error Action |
 |-------|------|-------|--------------|
-| **Layer 1: File** | Extension, size, gzip | Python stdlib | Move to invalid-files/ |
+| **Layer 1: File** | Extension, size, gzip | Python stdlib | Log error, return failure |
 | **Layer 2: Parsing** | Valid JSON, chunked reading | pd.read_json(chunksize=N) | Skip line, count error |
 | **Layer 3: Dtype** | Field types, coercion | df.astype(dtype) | Set to NaN, count error |
-| **Layer 4: Value** | Required fields, event types | df.isin(), df.isnull() | Filter out, move to DLQ |
-| **Layer 5: Business** | Timestamps, references | Custom validators | Move to DLQ |
+| **Layer 4: Value** | Required fields (pass-through event types) | df.isnull(), vectorized ops | Filter out, log warning |
+| **Layer 5: Business** | Timestamps (no future dates) | Custom validators | Log warning, continue |
+
+**Note:** Event types use **pass-through mode** - any event type string is accepted (not validated against whitelist) to handle new GitHub event types.
 
 **Chunked Processing with Pandas:**
 

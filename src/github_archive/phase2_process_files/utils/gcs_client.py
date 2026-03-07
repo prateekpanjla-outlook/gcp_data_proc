@@ -136,7 +136,7 @@ class GCSClient:
         gcs_path: str,
         local_path: str,
         decompress: bool = True
-    ) -> FileMetadata:
+    ) -> tuple[str, FileMetadata]:
         """
         Download a file from GCS to local storage.
 
@@ -146,7 +146,8 @@ class GCSClient:
             decompress: Whether to decompress if gzip
 
         Returns:
-            FileMetadata with information about the downloaded file
+            Tuple of (actual_file_path, FileMetadata)
+            Note: actual_file_path may differ from local_path if decompression occurred
         """
         path = GCSPath.parse(gcs_path)
         bucket = self.client.bucket(path.bucket)
@@ -178,7 +179,7 @@ class GCSClient:
             os.remove(local_path)
             local_path = decompressed_path
 
-        return metadata
+        return local_path, metadata
 
     def write_file(
         self,
@@ -431,7 +432,7 @@ def read_pandas_dataframe_from_gcs(
 
     try:
         # Download file
-        metadata = client.read_file_to_local(gcs_path, tmp_path, decompress=True)
+        tmp_path, _ = client.read_file_to_local(gcs_path, tmp_path, decompress=True)
 
         # Read with Pandas
         if chunksize:

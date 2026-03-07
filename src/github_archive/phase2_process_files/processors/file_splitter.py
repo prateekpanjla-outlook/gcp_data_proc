@@ -20,9 +20,9 @@ try:
 except ImportError:
     PANDAS_AVAILABLE = False
 
-from ..utils.gcs_client import GCSClient, GCSPath
-from ..utils.logger import Phase2Logger
-from ..validators.file_validator import FILE_NAME_PATTERN
+from utils.gcs_client import GCSClient, GCSPath
+from utils.logger import Phase2Logger
+from validators.file_validator import FILE_NAME_PATTERN
 
 
 # =============================================================================
@@ -119,7 +119,7 @@ class GitHubArchiveFileSplitter:
 
         try:
             # Download from GCS
-            self.gcs_client.read_file_to_local(input_gcs_path, tmp_path, decompress=True)
+            tmp_path, _ = self.gcs_client.read_file_to_local(input_gcs_path, tmp_path, decompress=True)
 
             # Get file size
             file_size = os.path.getsize(tmp_path)

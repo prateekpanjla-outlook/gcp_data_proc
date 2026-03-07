@@ -278,7 +278,8 @@ class GCSNDJSONWriter(NDJSONWriter):
     def __init__(
         self,
         compress: bool = True,
-        bucket_name: Optional[str] = None
+        bucket_name: Optional[str] = None,
+        project_id: Optional[str] = None
     ):
         """
         Initialize the GCS NDJSON writer.
@@ -286,9 +287,11 @@ class GCSNDJSONWriter(NDJSONWriter):
         Args:
             compress: Whether to gzip compress the output
             bucket_name: Default GCS bucket name
+            project_id: GCP project ID for authentication
         """
         super().__init__(compress=compress)
         self.bucket_name = bucket_name
+        self.project_id = project_id or os.getenv('PROJECT_ID')
 
     def write_dataframe_to_gcs(
         self,
@@ -330,8 +333,8 @@ class GCSNDJSONWriter(NDJSONWriter):
         if self.compress and not blob_path.endswith('.gz'):
             blob_path = blob_path + '.gz'
 
-        # Create client and blob
-        client = storage.Client()
+        # Create client and blob with proper authentication
+        client = storage.Client(project=self.project_id)
         blob = Blob(blob_path, client.bucket(bucket))
 
         records_written = 0
@@ -395,9 +398,9 @@ def create_output_path(
     Returns:
         Full output path
     """
-    # Build filename
+    # Build filename (hour is NOT zero-padded to match GitHub Archive format)
     if hour is not None:
-        filename = f"{date_str}-{hour:02d}"
+        filename = f"{date_str}-{hour}"
     else:
         filename = date_str
 

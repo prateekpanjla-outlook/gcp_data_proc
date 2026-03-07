@@ -13,13 +13,13 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from ..validators.file_validator import validate_file, should_split_file
-from ..validators.dtype_validator import DtypeValidator
-from ..validators.value_validator import ValueValidator
-from ..processors.transformer import GitHubEventTransformer
-from ..writers.ndjson_writer import GCSNDJSONWriter, create_output_path
-from ..utils.gcs_client import GCSClient
-from ..utils.logger import Phase2Logger
+from validators.file_validator import validate_file, should_split_file
+from validators.dtype_validator import DtypeValidator
+from validators.value_validator import ValueValidator
+from processors.transformer import GitHubEventTransformer
+from writers.ndjson_writer import GCSNDJSONWriter, create_output_path
+from utils.gcs_client import GCSClient
+from utils.logger import Phase2Logger
 
 
 # =============================================================================
@@ -111,7 +111,7 @@ class GitHubArchiveFileProcessor:
         start_time = time.time()
 
         # Extract file name from path
-        from ..utils.gcs_client import GCSPath
+        from utils.gcs_client import GCSPath
         input_path = GCSPath.parse(input_gcs_path)
         file_name = input_path.get_filename()
 
@@ -241,13 +241,13 @@ class GitHubArchiveFileProcessor:
         total_errors = 0
         total_warnings = 0
 
-        # Download to temp file
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as tmp:
+        # Download to temp file (use .json.gz suffix so decompress logic works)
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.json.gz') as tmp:
             tmp_path = tmp.name
 
         try:
             # Download and decompress from GCS
-            self.gcs_client.read_file_to_local(input_gcs_path, tmp_path, decompress=True)
+            tmp_path, _ = self.gcs_client.read_file_to_local(input_gcs_path, tmp_path, decompress=True)
 
             # Extract date/hour from filename for output naming
             date_str = file_name.replace('.json.gz', '')
@@ -256,7 +256,8 @@ class GitHubArchiveFileProcessor:
             # Initialize GCS writer for streaming uploads
             writer = GCSNDJSONWriter(
                 compress=True,
-                bucket_name=self.staging_bucket
+                bucket_name=self.staging_bucket,
+                project_id=self.project_id
             )
 
             # Track output files
@@ -271,8 +272,10 @@ class GitHubArchiveFileProcessor:
 
                 # Validate dtypes
                 dtype_result = self.dtype_validator.validate_input_dtypes(chunk_df)
-                if dtype_result.null_counts:
-                    total_errors += sum(dtype_result.null_counts.values())
+
+                # Only count coercion nulls as errors (not source nulls)
+                if dtype_result.coercion_null_counts:
+                    total_errors += sum(dtype_result.coercion_null_counts.values())
 
                 working_df = dtype_result.coerced_df if dtype_result.coerced_df is not None else chunk_df
 

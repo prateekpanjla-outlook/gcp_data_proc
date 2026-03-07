@@ -12,8 +12,9 @@ from dataclasses import dataclass
 # =============================================================================
 # FILE NAME PATTERN
 # =============================================================================
-# Expected format: YYYY-MM-DD-HH.json.gz
-FILE_NAME_PATTERN = re.compile(r'^(\d{4}-\d{2}-\d{2}-\d{2})\.json\.gz$')
+# Expected format: YYYY-MM-DD-H.json.gz (hour can be 1 or 2 digits)
+# GitHub Archive uses single-digit hours (0-9) for hours 0-9, not zero-padded
+FILE_NAME_PATTERN = re.compile(r'^(\d{4}-\d{2}-\d{2}-\d{1,2})\.json\.gz$')
 
 
 # =============================================================================

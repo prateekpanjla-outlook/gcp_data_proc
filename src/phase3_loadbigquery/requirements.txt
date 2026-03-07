@@ -1,0 +1,5 @@
+# BigQuery Loader for GitHub Archive Phase 3
+google-cloud-bigquery[pandas]==3.18.0
+google-cloud-storage==2.18.0
+flask==3.0.0
+gunicorn==21.2.0

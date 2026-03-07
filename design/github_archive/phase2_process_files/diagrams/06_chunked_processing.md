@@ -165,8 +165,10 @@ Peak: 600 MB (not 4GB for full file!)
 | JSON parse errors | Skip line, count error | Continue to next record |
 | Dtype coercion | Set to NaN, count error | Continue processing |
 | Value validation | Filter out invalid rows | Continue with valid rows |
-| Chunk write failure | Retry (3x), then DLQ | Move to next chunk |
+| Chunk write failure | Log error, return failure | Stop processing |
 | Transform failure | Log error, skip row | Continue to next row |
+
+**Note:** No DLQ (Dead Letter Queue) is implemented. Errors are logged to Cloud Logging.
 
 ## Integration with File Splitter
 

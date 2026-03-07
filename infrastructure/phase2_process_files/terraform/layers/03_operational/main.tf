@@ -11,11 +11,11 @@ terraform {
     }
   }
 
-  backend "gcs" {
-    bucket         = "REPLACE_WITH_TERRAFORM_STATE_BUCKET"
-    prefix         = "terraform/state/phase2-operational"
-    skip_bucket_versioning = false
-  }
+  # backend "gcs" {
+  #   bucket         = "REPLACE_WITH_TERRAFORM_STATE_BUCKET"
+  #   prefix         = "terraform/state/phase2-operational"
+  # }
+  # Using local backend for development
 }
 
 provider "google" {
@@ -24,21 +24,19 @@ provider "google" {
 }
 
 # =============================================================================
-# Remote State Data Sources
+# Remote State Data Sources (using local backend)
 # =============================================================================
 data "terraform_remote_state" "static" {
-  backend = "gcs"
+  backend = "local"
   config = {
-    bucket = var.terraform_state_bucket
-    prefix = "terraform/state/phase2-static"
+    path = "../01_static/terraform.tfstate"
   }
 }
 
 data "terraform_remote_state" "first_time" {
-  backend = "gcs"
+  backend = "local"
   config = {
-    bucket = var.terraform_state_bucket
-    prefix = "terraform/state/phase2-first-time"
+    path = "../02_first_time/terraform.tfstate"
   }
 }
 
@@ -63,73 +61,68 @@ resource "google_cloud_run_v2_service" "processor" {
   name     = "${local.env_prefix}-github-archive-processor"
   location = var.region
   project  = var.project_id
+  deletion_protection = false  # Allow deletion without explicit flag
+  ingress  = "INGRESS_TRAFFIC_ALL"  # Allow public ingress
 
   template {
-    metadata {
-      annotations = {
-        # Autoscaling
-        "autoscaling.knative.dev/maxScale"       = tostring(var.max_instances)
-        "autoscaling.knative.dev/minScale"       = "0"
-        "autoscaling.knative.dev/target"         = "10"
-        "autoscaling.knative.dev/scaleDownDelay" = "30s"
+    # Annotations are set directly at template level in v2
+    annotations = {
+      # Health check
+      "run.googleapis.com/health-check-path" = "/health"
+    }
 
-        # Performance
-        "run.googleapis.com/cpu-throttling"       = "false"
-        "run.googleapis.com/execution-environment" = "gen2"
+    # Execution environment
+    execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
 
-        # Health check
-        "run.googleapis.com/health-check-path" = "/health"
-        "run.googleapis.com/health-check-per-second" = "1"
+    # Timeout (duration format with 's' suffix)
+    timeout = "3600s"  # 1 hour
+
+    # Max concurrent requests per instance
+    max_instance_request_concurrency = 10
+
+    containers {
+      # Image for the processor service
+      image = "${var.region}-docker.pkg.dev/${var.project_id}/github-archive/processor:${var.image_tag}"
+
+      env {
+        name  = "PROJECT_ID"
+        value = var.project_id
+      }
+      env {
+        name  = "LANDING_BUCKET"
+        value = data.terraform_remote_state.static.outputs.landing_bucket_name
+      }
+      env {
+        name  = "STAGING_BUCKET"
+        value = data.terraform_remote_state.static.outputs.staging_bucket_name
+      }
+      env {
+        name  = "FILE_SIZE_THRESHOLD_MB"
+        value = tostring(var.file_size_threshold_mb)
+      }
+      env {
+        name  = "CHUNKSIZE"
+        value = tostring(var.chunksize)
+      }
+      # Note: PORT is automatically set by Cloud Run (reserved env var)
+
+      resources {
+        limits = {
+          cpu    = tostring(var.processor_cpu)
+          memory = "${var.processor_memory}Gi"
+        }
+        # Note: 'requests' not supported in Cloud Run v2
+        cpu_idle = true  # CPU only allocated during requests (default behavior)
       }
     }
 
-    template {
-      containers {
-        # Image for the processor service
-        image = "${var.region}-docker.pkg.dev/${var.project_id}/github-archive/processor:${var.image_tag}"
+    service_account = data.terraform_remote_state.static.outputs.processor_service_account_email
+  }
 
-        env {
-          name  = "PROJECT_ID"
-          value = var.project_id
-        }
-        env {
-          name  = "LANDING_BUCKET"
-          value = data.terraform_remote_state.static.outputs.landing_bucket_name
-        }
-        env {
-          name  = "STAGING_BUCKET"
-          value = data.terraform_remote_state.static.outputs.staging_bucket_name
-        }
-        env {
-          name  = "FILE_SIZE_THRESHOLD_MB"
-          value = tostring(var.file_size_threshold_mb)
-        }
-        env {
-          name  = "CHUNKSIZE"
-          value = tostring(var.chunksize)
-        }
-        env {
-          name  = "PORT"
-          value = "8080"
-        }
-
-        resources {
-          limits = {
-            cpu    = tostring(var.processor_cpu)
-            memory = "${var.processor_memory}Gi"
-          }
-          requests = {
-            cpu    = "100m"
-            memory = "512Mi"
-          }
-        }
-      }
-
-      container_concurrency = 10
-      timeout_seconds      = 3600  # 1 hour
-
-      service_account = data.terraform_remote_state.static.outputs.processor_service_account_email
-    }
+  # Scaling settings at service level
+  scaling {
+    min_instance_count = 0
+    max_instance_count = var.max_instances
   }
 
   labels = local.common_labels
@@ -141,10 +134,15 @@ resource "google_cloud_run_v2_service" "processor" {
 }
 
 # =============================================================================
-# Eventarc Trigger #1: Main file processor (raw/ folder)
+# Eventarc Trigger: Storage events (all files in landing bucket)
 # =============================================================================
-resource "google_eventarc_trigger" "main_file_processor" {
-  name        = "${local.env_prefix}-github-archive-main-file-processor"
+# NOTE: Cloud Storage Eventarc triggers do NOT support 'name' attribute filtering.
+# Only 'type' and 'bucket' attributes are supported for google.cloud.storage.object.v1.finalized.
+# Path filtering is done in the Cloud Run service (main.py) instead.
+#
+# We use a single trigger for the bucket to avoid duplicate Pub/Sub notifications.
+resource "google_eventarc_trigger" "storage_events" {
+  name        = "${local.env_prefix}-github-archive-storage"
   location    = var.region
   project     = var.project_id
 
@@ -156,11 +154,6 @@ resource "google_eventarc_trigger" "main_file_processor" {
   matching_criteria {
     attribute = "bucket"
     value     = data.terraform_remote_state.static.outputs.landing_bucket_name
-  }
-
-  matching_criteria {
-    attribute = "name"
-    value     = "github-archive/raw/*.json.gz"
   }
 
   destination {
@@ -177,47 +170,7 @@ resource "google_eventarc_trigger" "main_file_processor" {
     data.terraform_remote_state.first_time
   ]
 
-  labels = merge(local.common_labels, {purpose = "raw-file-trigger"})
-}
-
-# =============================================================================
-# Eventarc Trigger #2: Chunk processor (chunks/ folder)
-# =============================================================================
-resource "google_eventarc_trigger" "chunk_processor" {
-  name        = "${local.env_prefix}-github-archive-chunk-processor"
-  location    = var.region
-  project     = var.project_id
-
-  matching_criteria {
-    attribute = "type"
-    value     = "google.cloud.storage.object.v1.finalized"
-  }
-
-  matching_criteria {
-    attribute = "bucket"
-    value     = data.terraform_remote_state.static.outputs.landing_bucket_name
-  }
-
-  matching_criteria {
-    attribute = "name"
-    value     = "github-archive/chunks/*.json.gz"
-  }
-
-  destination {
-    cloud_run_service {
-      service = google_cloud_run_v2_service.processor.name
-      region  = var.region
-    }
-  }
-
-  service_account = data.terraform_remote_state.static.outputs.eventarc_invoker_service_account_email
-
-  depends_on = [
-    data.terraform_remote_state.static,
-    data.terraform_remote_state.first_time
-  ]
-
-  labels = merge(local.common_labels, {purpose = "chunk-trigger"})
+  labels = merge(local.common_labels, {purpose = "storage-trigger"})
 }
 
 # =============================================================================

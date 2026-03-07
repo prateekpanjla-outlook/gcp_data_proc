@@ -11,11 +11,11 @@ terraform {
     }
   }
 
-  backend "gcs" {
-    bucket         = "REPLACE_WITH_TERRAFORM_STATE_BUCKET"
-    prefix         = "terraform/state/phase2-static"
-    skip_bucket_versioning = false
-  }
+  # backend "gcs" {
+  #   bucket         = "REPLACE_WITH_TERRAFORM_STATE_BUCKET"
+  #   prefix         = "terraform/state/phase2-static"
+  # }
+  # Using local backend for development
 }
 
 provider "google" {
@@ -119,23 +119,8 @@ resource "google_project_iam_member" "splitter_logging" {
 }
 
 # =============================================================================
-# IAM: Service Agents (for Eventarc - enable in Layer 02)
-# =============================================================================
-# These are defined here but depend on APIs being enabled first
-# Cloud Storage service agent to publish events
-resource "google_project_iam_member" "storage_pubsub_publisher" {
-  project = var.project_id
-  role    = "roles/pubsub.publisher"
-  member  = "serviceAccount:service-${data.google_project.current.number}@gs-project-accounts.iam.gserviceaccount.com"
-}
-
-# Eventarc service agent
-resource "google_project_iam_member" "eventarc_event_receiver" {
-  project = var.project_id
-  role    = "roles/eventarc.eventReceiver"
-  member  = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-eventarc.iam.gserviceaccount.com"
-}
-
+# Note: Service Agent IAM bindings moved to Layer 02
+# These require APIs to be enabled first (eventarc.googleapis.com, storage.googleapis.com)
 # =============================================================================
 # IAM: Bucket-Level (Least Privilege)
 # =============================================================================
@@ -149,6 +134,13 @@ resource "google_storage_bucket_iam_member" "processor_landing_read" {
 resource "google_storage_bucket_iam_member" "processor_staging_write" {
   bucket = google_storage_bucket.staging.name
   role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.processor.email}"
+}
+
+# Processor SA: Read from staging bucket (to check if files exist, read temp files)
+resource "google_storage_bucket_iam_member" "processor_staging_read" {
+  bucket = google_storage_bucket.staging.name
+  role   = "roles/storage.objectViewer"
   member = "serviceAccount:${google_service_account.processor.email}"
 }
 
