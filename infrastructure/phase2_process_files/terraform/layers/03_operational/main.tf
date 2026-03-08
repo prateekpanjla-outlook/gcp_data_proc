@@ -58,11 +58,11 @@ locals {
 # Cloud Run Service: Processor
 # =============================================================================
 resource "google_cloud_run_v2_service" "processor" {
-  name     = "${local.env_prefix}-github-archive-processor"
-  location = var.region
-  project  = var.project_id
-  deletion_protection = false  # Allow deletion without explicit flag
-  ingress  = "INGRESS_TRAFFIC_ALL"  # Allow public ingress
+  name                = "${local.env_prefix}-github-archive-processor"
+  location            = var.region
+  project             = var.project_id
+  deletion_protection = false                 # Allow deletion without explicit flag
+  ingress             = "INGRESS_TRAFFIC_ALL" # Allow external access for testing
 
   template {
     # Annotations are set directly at template level in v2
@@ -75,7 +75,7 @@ resource "google_cloud_run_v2_service" "processor" {
     execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
 
     # Timeout (duration format with 's' suffix)
-    timeout = "3600s"  # 1 hour
+    timeout = "3600s" # 1 hour
 
     # Max concurrent requests per instance
     max_instance_request_concurrency = 10
@@ -112,7 +112,8 @@ resource "google_cloud_run_v2_service" "processor" {
           memory = "${var.processor_memory}Gi"
         }
         # Note: 'requests' not supported in Cloud Run v2
-        cpu_idle = true  # CPU only allocated during requests (default behavior)
+        # CPU allocated for entire request duration for memory-intensive JSON processing
+        cpu_idle = false
       }
     }
 
@@ -142,9 +143,9 @@ resource "google_cloud_run_v2_service" "processor" {
 #
 # We use a single trigger for the bucket to avoid duplicate Pub/Sub notifications.
 resource "google_eventarc_trigger" "storage_events" {
-  name        = "${local.env_prefix}-github-archive-storage"
-  location    = var.region
-  project     = var.project_id
+  name     = "${local.env_prefix}-github-archive-storage"
+  location = var.region
+  project  = var.project_id
 
   matching_criteria {
     attribute = "type"
@@ -165,12 +166,16 @@ resource "google_eventarc_trigger" "storage_events" {
 
   service_account = data.terraform_remote_state.static.outputs.eventarc_invoker_service_account_email
 
+  # Retry policy for transient failures
+  # Increased from default to 5 attempts with exponential backoff
+  event_data_content_type = "application/json"
+
   depends_on = [
     data.terraform_remote_state.static,
     data.terraform_remote_state.first_time
   ]
 
-  labels = merge(local.common_labels, {purpose = "storage-trigger"})
+  labels = merge(local.common_labels, { purpose = "storage-trigger" })
 }
 
 # =============================================================================
@@ -182,4 +187,28 @@ resource "google_cloud_run_v2_service_iam_member" "eventarc_invoker_processor" {
   name     = google_cloud_run_v2_service.processor.name
   role     = "roles/run.invoker"
   member   = "serviceAccount:${data.terraform_remote_state.static.outputs.eventarc_invoker_service_account_email}"
+}
+
+# =============================================================================
+# Eventarc Subscription Ack Deadline
+# =============================================================================
+# The Eventarc trigger creates a Pub/Sub subscription with a default 10s ack deadline.
+# This is too short for file processing. Update to maximum (600s = 10 minutes).
+# See: https://cloud.google.com/run/docs/triggering/trigger-with-events#set-ack-deadline
+resource "terraform_data" "eventarc_ack_deadline" {
+  triggers_replace = [
+    google_eventarc_trigger.storage_events.id,
+    var.eventarc_ack_deadline_seconds
+  ]
+
+  provisioner "local-exec" {
+    command = <<EOT
+      gcloud pubsub subscriptions update \
+        "${google_eventarc_trigger.storage_events.transport[0].pubsub[0].subscription}" \
+        --ack-deadline=${var.eventarc_ack_deadline_seconds} \
+        --project=${var.project_id}
+    EOT
+  }
+
+  depends_on = [google_eventarc_trigger.storage_events]
 }

@@ -65,10 +65,27 @@ resource "google_project_iam_member" "github_processor_bigquery_editor" {
   member  = "serviceAccount:${google_service_account.github_processor.email}"
 }
 
-resource "google_project_iam_member" "github_processor_storage_viewer" {
-  project = var.project_id
-  role    = "roles/storage.objectViewer"
-  member  = "serviceAccount:${google_service_account.github_processor.email}"
+# Grant read access to the landing bucket to read source files.
+resource "google_storage_bucket_iam_member" "github_processor_landing_viewer" {
+  bucket = var.github_bucket_name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.github_processor.email}"
+}
+
+# Grant write access to the staging bucket to save processed files.
+# Note: This assumes the staging bucket name follows the project's naming convention.
+resource "google_storage_bucket_iam_member" "github_processor_staging_creator" {
+  bucket = "${var.project_id}-${var.environment}-github-archive-staging"
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.github_processor.email}"
+}
+
+# Grant read access to the staging bucket. This is required for the service to
+# check if a file already exists before attempting to write it, which prevents the 403 error.
+resource "google_storage_bucket_iam_member" "github_processor_staging_viewer" {
+  bucket = "${var.project_id}-${var.environment}-github-archive-staging"
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.github_processor.email}"
 }
 
 resource "google_project_iam_member" "github_processor_pubsub_publisher" {

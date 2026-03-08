@@ -12,11 +12,13 @@ from typing import List, Optional
 from dataclasses import dataclass
 
 import pandas as pd
+from google.api_core import exceptions as gcp_exceptions
 
 from validators.file_validator import validate_file, should_split_file
 from validators.dtype_validator import DtypeValidator
 from validators.value_validator import ValueValidator
 from processors.transformer import GitHubEventTransformer
+from processors.file_splitter import mark_chunk_processed
 from writers.ndjson_writer import GCSNDJSONWriter, create_output_path
 from utils.gcs_client import GCSClient
 from utils.logger import Phase2Logger
@@ -118,7 +120,7 @@ class GitHubArchiveFileProcessor:
         # Get file metadata
         try:
             metadata = self.gcs_client.get_file_metadata(input_gcs_path)
-        except Exception as e:
+        except (gcp_exceptions.Forbidden, gcp_exceptions.NotFound) as e:
             self.logger.log_file_error(file_name, f"Failed to get file metadata: {e}")
             return FileProcessingResult(
                 success=False,
@@ -201,8 +203,19 @@ class GitHubArchiveFileProcessor:
 
             return result
 
+        except gcp_exceptions.Forbidden as e:
+            # This provides a much clearer error message for permission issues
+            error_message = f"Permission Denied during processing. Check IAM roles and bucket policies (e.g., Retention Policy). Details: {e.message}"
+            self.logger.log_file_error(file_name, error_message)
+            return FileProcessingResult(
+                success=False, input_file=input_gcs_path, output_file=None, output_files=[],
+                records_in=0, records_out=0, errors=1, warnings=0,
+                duration_seconds=time.time() - start_time,
+                error_message=error_message
+            )
+
         except Exception as e:
-            self.logger.log_file_error(file_name, f"Processing failed: {e}")
+            self.logger.log_file_error(file_name, f"An unexpected error occurred: {e}")
             return FileProcessingResult(
                 success=False,
                 input_file=input_gcs_path,
@@ -331,6 +344,26 @@ class GitHubArchiveFileProcessor:
             total_records_out > 0 and
             (total_errors == 0 or total_errors / total_records_in < 0.1)
         )
+
+        # If this was a chunk file from a split operation, mark it as processed
+        if success and '/chunks/' in input_gcs_path:
+            try:
+                mark_result = mark_chunk_processed(
+                    project_id=self.project_id,
+                    landing_bucket=self.landing_bucket,
+                    chunk_file=input_gcs_path,
+                    logger=self.logger
+                )
+                self.logger.info(
+                    f"Chunk marked as processed: {input_gcs_path}",
+                    mark_result=mark_result
+                )
+            except Exception as mark_err:
+                # Log but don't fail the whole processing
+                self.logger.warning(
+                    f"Failed to mark chunk as processed: {mark_err}",
+                    chunk_file=input_gcs_path
+                )
 
         # Return result with multiple output files
         return FileProcessingResult(

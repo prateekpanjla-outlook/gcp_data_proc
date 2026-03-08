@@ -363,9 +363,15 @@ class GCSNDJSONWriter(NDJSONWriter):
                 if self.compress:
                     gzip_file.close()
 
-        # Get blob size
-        blob.reload()
-        bytes_written = blob.size
+        # Get blob size (non-critical, handle gracefully)
+        try:
+            blob.reload()
+            bytes_written = blob.size
+        except Exception as e:
+            # Log but don't fail - upload was successful
+            import logging
+            logging.getLogger(__name__).warning(f"Could not get blob size after upload: {e}")
+            bytes_written = -1  # Unknown size
 
         return WriteResult(
             bytes_written=bytes_written,

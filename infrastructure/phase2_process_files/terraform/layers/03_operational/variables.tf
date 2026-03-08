@@ -81,3 +81,14 @@ variable "chunksize" {
     error_message = "Chunksize must be between 10,000 and 1,000,000"
   }
 }
+
+variable "eventarc_ack_deadline_seconds" {
+  description = "Pub/Sub acknowledgement deadline for Eventarc trigger (max 600 seconds)"
+  type        = number
+  default     = 600
+
+  validation {
+    condition     = var.eventarc_ack_deadline_seconds >= 10 && var.eventarc_ack_deadline_seconds <= 600
+    error_message = "Eventarc ack deadline must be between 10 and 600 seconds"
+  }
+}

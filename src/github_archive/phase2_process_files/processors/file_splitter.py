@@ -358,15 +358,37 @@ def run_splitter_job(
 
     result = splitter.split_file(input_file)
 
-    # Delete original file after successful split
+    # SAFETY: Do NOT delete original file immediately after split.
+    # Original file should only be deleted after ALL chunks are successfully processed.
+    # This prevents data loss if chunk processing fails.
+    #
+    # Deletion strategy:
+    # 1. Write a metadata file alongside chunks: {prefix}-chunk-metadata.json
+    # 2. Metadata contains: original_file, chunk_count, created_timestamp
+    # 3. After all chunks are processed, a cleanup job deletes the original
+    #
+    # For now, we keep the original file and log that cleanup is needed.
     if result.success and result.output_files:
+        logger.info(
+            f"Split complete - original file preserved for safety",
+            input_file=input_file,
+            chunk_count=result.chunk_count,
+            note="Original file should be deleted after all chunks are processed"
+        )
+
+        # Write metadata file for cleanup job (future implementation)
         try:
-            client = GCSClient(project_id=project_id)
-            if client.file_exists(input_file):
-                client.delete_file(input_file)
-                logger.info(f"Deleted original file after split: {input_file}")
-        except Exception as e:
-            logger.warning(f"Failed to delete original file: {e}")
+            _write_split_metadata(
+                project_id=project_id,
+                landing_bucket=landing_bucket,
+                original_file=input_file,
+                output_prefix=input_file.split('/')[-1].replace('.json.gz', ''),
+                chunk_count=result.chunk_count,
+                output_files=result.output_files,
+                logger=logger
+            )
+        except Exception as meta_err:
+            logger.warning(f"Failed to write split metadata: {meta_err}")
 
     return {
         'success': result.success,
@@ -377,6 +399,169 @@ def run_splitter_job(
         'duration_seconds': result.duration_seconds,
         'error_message': result.error_message
     }
+
+
+def _write_split_metadata(
+    project_id: str,
+    landing_bucket: str,
+    original_file: str,
+    output_prefix: str,
+    chunk_count: int,
+    output_files: List[str],
+    logger: Phase2Logger
+) -> None:
+    """
+    Write metadata file for tracking split files.
+
+    This metadata file is used to:
+    1. Track which files have been split
+    2. Enable cleanup after all chunks are processed
+    3. Support recovery from failures
+
+    Args:
+        project_id: GCP project ID
+        landing_bucket: Landing bucket name
+        original_file: Original file GCS path
+        output_prefix: Output prefix for chunks
+        chunk_count: Number of chunks created
+        output_files: List of chunk GCS paths
+        logger: Logger instance
+    """
+    from google.cloud import storage
+    import json
+    from datetime import datetime
+
+    client = storage.Client(project=project_id)
+    bucket = client.bucket(landing_bucket)
+
+    # Metadata filename based on original
+    # e.g., 2026-03-06-12.json.gz -> 2026-03-06-12.split-metadata.json
+    metadata_filename = f"{output_prefix}.split-metadata.json"
+    blob_name = f"github-archive/chunks/{metadata_filename}"
+
+    metadata = {
+        'original_file': original_file,
+        'split_timestamp': datetime.utcnow().isoformat(),
+        'chunk_count': chunk_count,
+        'output_files': output_files,
+        'chunks_processed': [],  # Will be updated as chunks are processed
+        'status': 'pending_cleanup',  # pending_cleanup, cleanup_complete
+        'cleanup_after': chunk_count  # Delete original after this many chunks processed
+    }
+
+    blob = bucket.blob(blob_name)
+    blob.upload_from_string(
+        json.dumps(metadata, indent=2),
+        content_type='application/json'
+    )
+
+    logger.info(
+        f"Split metadata written: {metadata_filename}",
+        original_file=original_file,
+        chunk_count=chunk_count
+    )
+
+
+def mark_chunk_processed(
+    project_id: str,
+    landing_bucket: str,
+    chunk_file: str,
+    logger: Phase2Logger
+) -> Dict[str, Any]:
+    """
+    Mark a chunk as processed and check if original can be deleted.
+
+    This should be called by the processor after successfully processing a chunk.
+
+    Args:
+        project_id: GCP project ID
+        landing_bucket: Landing bucket name
+        chunk_file: GCS path of the processed chunk
+        logger: Logger instance
+
+    Returns:
+        Dictionary with status and whether cleanup is complete
+    """
+    from google.cloud import storage
+    import json
+    import re
+
+    client = storage.Client(project=project_id)
+    bucket = client.bucket(landing_bucket)
+
+    # Extract prefix from chunk filename
+    # e.g., 2026-03-06-12-chunk-001.json.gz -> 2026-03-06-12
+    chunk_name = chunk_file.split('/')[-1]
+    match = re.match(r'(.+)-chunk-\d+\.json\.gz', chunk_name)
+
+    if not match:
+        logger.warning(f"Could not extract metadata prefix from chunk: {chunk_name}")
+        return {'status': 'error', 'message': 'Could not extract prefix'}
+
+    output_prefix = match.group(1)
+    metadata_filename = f"{output_prefix}.split-metadata.json"
+    blob_name = f"github-archive/chunks/{metadata_filename}"
+
+    try:
+        blob = bucket.blob(blob_name)
+        if not blob.exists():
+            logger.warning(f"Split metadata not found: {metadata_filename}")
+            return {'status': 'not_found', 'message': 'Metadata not found'}
+
+        # Download and update metadata
+        metadata_str = blob.download_as_text()
+        metadata = json.loads(metadata_str)
+
+        # Add this chunk to processed list
+        if chunk_file not in metadata.get('chunks_processed', []):
+            metadata.setdefault('chunks_processed', []).append(chunk_file)
+
+        # Check if all chunks are processed
+        all_processed = len(metadata['chunks_processed']) >= metadata['chunk_count']
+
+        if all_processed:
+            metadata['status'] = 'cleanup_complete'
+
+            # Delete original file
+            try:
+                original_path = GCSPath.parse(metadata['original_file'])
+                original_blob = bucket.blob(original_path.blob_name)
+                if original_blob.exists():
+                    original_blob.delete()
+                    logger.info(
+                        f"Original file deleted after all chunks processed",
+                        original_file=metadata['original_file'],
+                        chunks_processed=len(metadata['chunks_processed'])
+                    )
+            except Exception as del_err:
+                logger.error(f"Failed to delete original file: {del_err}")
+
+            # Delete the processed chunks
+            for chunk_path in metadata['chunks_processed']:
+                try:
+                    chunk_blob_name = chunk_path.replace(f'gs://{landing_bucket}/', '')
+                    chunk_blob = bucket.blob(chunk_blob_name)
+                    if chunk_blob.exists():
+                        chunk_blob.delete()
+                except Exception as chunk_del_err:
+                    logger.warning(f"Failed to delete chunk {chunk_path}: {chunk_del_err}")
+
+        # Update metadata
+        blob.upload_from_string(
+            json.dumps(metadata, indent=2),
+            content_type='application/json'
+        )
+
+        return {
+            'status': 'updated',
+            'all_processed': all_processed,
+            'chunks_processed': len(metadata['chunks_processed']),
+            'total_chunks': metadata['chunk_count']
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to update split metadata: {e}")
+        return {'status': 'error', 'message': str(e)}
 
 
 if __name__ == '__main__':

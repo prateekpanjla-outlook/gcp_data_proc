@@ -96,9 +96,15 @@ class ValueValidator:
                 errors[col] = int(null_count)
 
         if errors:
-            # Filter out rows with nulls in required fields
+            # Filter out rows with nulls OR empty strings in required fields
+            # Note: Using AND logic - both conditions must be true (not null AND not empty)
             for col in REQUIRED_FIELDS:
-                valid_df = valid_df[valid_df[col].notna() | (valid_df[col] != '')]
+                # Check for both null values and empty/whitespace-only strings
+                non_empty_mask = (
+                    valid_df[col].notna() &
+                    (valid_df[col].astype(str).str.strip() != '')
+                )
+                valid_df = valid_df[non_empty_mask]
 
         invalid_count = df.shape[0] - valid_df.shape[0]
 

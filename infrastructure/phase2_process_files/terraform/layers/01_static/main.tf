@@ -111,11 +111,24 @@ resource "google_project_iam_member" "processor_monitoring" {
   member  = "serviceAccount:${google_service_account.processor.email}"
 }
 
-# Splitter SA - Logging only
+# Splitter SA - Logging and monitoring
 resource "google_project_iam_member" "splitter_logging" {
   project = var.project_id
   role    = "roles/logging.logWriter"
   member  = "serviceAccount:${google_service_account.splitter.email}"
+}
+
+resource "google_project_iam_member" "splitter_monitoring" {
+  project = var.project_id
+  role    = "roles/monitoring.metricWriter"
+  member  = "serviceAccount:${google_service_account.splitter.email}"
+}
+
+# Eventarc Invoker SA - Logging (required for Eventarc to write trigger logs)
+resource "google_project_iam_member" "eventarc_invoker_logging" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.eventarc_invoker.email}"
 }
 
 # =============================================================================
@@ -137,7 +150,9 @@ resource "google_storage_bucket_iam_member" "processor_staging_write" {
   member = "serviceAccount:${google_service_account.processor.email}"
 }
 
-# Processor SA: Read from staging bucket (to check if files exist, read temp files)
+# Processor SA: Read from staging bucket (to check if files exist, read temp files, blob.reload())
+# NOTE: objectViewer includes storage.objects.get which is needed for blob.reload() after uploads
+# See learnings/phase2_blob_reload_403_error.md for troubleshooting 403 errors
 resource "google_storage_bucket_iam_member" "processor_staging_read" {
   bucket = google_storage_bucket.staging.name
   role   = "roles/storage.objectViewer"

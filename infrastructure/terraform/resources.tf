@@ -1,33 +1,6 @@
 # Main infrastructure resources for the data pipeline
 
 # ==============================================================================
-# Service Account
-# ==============================================================================
-resource "google_service_account" "processor" {
-  project      = var.project_id
-  account_id   = "data-processor-sa"
-  display_name = "Data Pipeline Processor Service Account"
-}
-
-resource "google_project_iam_member" "processor_bigquery_admin" {
-  project = var.project_id
-  role    = "roles/bigquery.dataEditor"
-  member  = "serviceAccount:${google_service_account.processor.email}"
-}
-
-resource "google_project_iam_member" "processor_storage_admin" {
-  project = var.project_id
-  role    = "roles/storage.objectAdmin"
-  member  = "serviceAccount:${google_service_account.processor.email}"
-}
-
-resource "google_project_iam_member" "processor_logging_user" {
-  project = var.project_id
-  role    = "roles/logging.logWriter"
-  member  = "serviceAccount:${google_service_account.processor.email}"
-}
-
-# ==============================================================================
 # Cloud Storage Buckets
 # ==============================================================================
 
@@ -208,10 +181,10 @@ resource "google_cloud_run_v2_service" "github_processor" {
     }
 
     # Service account to run as
-    service_account = google_service_account.processor.email
+    service_account = google_service_account.github_processor.email
 
     # Timeout for processing
-    timeout_seconds = 3600 # 1 hour
+    timeout = "3600s" # 1 hour
 
     # Container startup CPU boost
     scaling {
@@ -220,9 +193,9 @@ resource "google_cloud_run_v2_service" "github_processor" {
   }
 
   labels = {
-    environment = var.environment
-    source      = "github-archive"
-    managed_by  = "terraform"
+    environment = var.environment,
+    source      = "github-archive",
+    managed_by  = "terraform",
   }
 
   traffic {
@@ -231,8 +204,9 @@ resource "google_cloud_run_v2_service" "github_processor" {
   }
 
   depends_on = [
-    google_project_iam_member.processor_bigquery_admin,
-    google_project_iam_member.processor_storage_admin,
+    google_project_iam_member.github_processor_bigquery_editor,
+    google_storage_bucket_iam_member.github_processor_staging_creator,
+    google_storage_bucket_iam_member.github_processor_staging_viewer,
   ]
 }
 
@@ -276,9 +250,9 @@ resource "google_cloud_run_v2_service" "hn_processor" {
       }
     }
 
-    service_account = google_service_account.processor.email
+    service_account = google_service_account.hn_processor.email # From service_accounts.tf
 
-    timeout_seconds = 3600
+    timeout = "3600s"
 
     scaling {
       scaling_mode = "AUTOMATIC"
@@ -297,8 +271,9 @@ resource "google_cloud_run_v2_service" "hn_processor" {
   }
 
   depends_on = [
-    google_project_iam_member.processor_bigquery_admin,
-    google_project_iam_member.processor_storage_admin,
+    # Depends on the specific IAM roles defined in service_accounts.tf
+    google_project_iam_member.hn_processor_bigquery_editor,
+    google_project_iam_member.hn_processor_storage_viewer,
   ]
 }
 
@@ -310,7 +285,9 @@ resource "google_cloud_run_v2_service_iam_member" "github_invoker" {
   location = google_cloud_run_v2_service.github_processor.location
   name     = google_cloud_run_v2_service.github_processor.name
   role     = "roles/run.invoker"
-  member   = "allUsers"
+  # This should be the Eventarc invoker service account, not allUsers.
+  # Assuming an eventarc invoker SA is defined elsewhere, e.g., 'dev-eventarc-invoker'
+  member   = "serviceAccount:dev-eventarc-invoker@${var.project_id}.iam.gserviceaccount.com"
 }
 
 resource "google_cloud_run_v2_service_iam_member" "hn_invoker" {
@@ -318,7 +295,9 @@ resource "google_cloud_run_v2_service_iam_member" "hn_invoker" {
   location = google_cloud_run_v2_service.hn_processor.location
   name     = google_cloud_run_v2_service.hn_processor.name
   role     = "roles/run.invoker"
-  member   = "allUsers"
+  # This should be the Cloud Scheduler service account, not allUsers.
+  # The scheduler SA is defined in service_accounts.tf
+  member   = "serviceAccount:${google_service_account.scheduler.email}"
 }
 
 # ==============================================================================
@@ -337,7 +316,8 @@ resource "google_eventarc_trigger" "github_storage" {
 
   matching_criteria {
     attribute = "bucket"
-    value     = google_storage_bucket.github_data.name
+    # The trigger must watch the LANDING bucket, not the staging/processed bucket.
+    value     = google_storage_bucket.github_archive_landing.name
   }
 
   matching_criteria {
@@ -352,15 +332,12 @@ resource "google_eventarc_trigger" "github_storage" {
     }
   }
 
-  service_account = google_service_account.processor.email
+  # The Eventarc trigger should use a dedicated invoker SA
+  service_account = "serviceAccount:dev-eventarc-invoker@${var.project_id}.iam.gserviceaccount.com"
 
   labels = {
     environment = var.environment
     source      = "github-archive"
-  }
-
-  depends_on = [
-    google_project_iam_member.processor_eventreceiver,
   ]
 }
 
@@ -375,14 +352,10 @@ resource "google_cloud_scheduler_job" "hn_fetch" {
     http_method = "GET"
     uri         = "${google_cloud_run_v2_service.hn_processor.uri}/tasks/fetch"
     oidc_token {
-      service_account_email = google_service_account.processor.email
+      service_account_email = google_service_account.scheduler.email # Use the scheduler SA
       audience              = google_cloud_run_v2_service.hn_processor.uri
     }
   }
-
-  depends_on = [
-    google_project_iam_member.processor_scheduler,
-  ]
 }
 
 resource "google_eventarc_trigger" "hn_scheduler" {
@@ -408,25 +381,11 @@ resource "google_eventarc_trigger" "hn_scheduler" {
     }
   }
 
-  service_account = google_service_account.processor.email
+  # The Eventarc trigger should use a dedicated invoker SA
+  service_account = "serviceAccount:dev-eventarc-invoker@${var.project_id}.iam.gserviceaccount.com"
 
   labels = {
     environment = var.environment
     source      = "hacker-news"
   }
-}
-
-# ==============================================================================
-# Additional IAM for Eventarc and Scheduler
-# ==============================================================================
-resource "google_project_iam_member" "processor_eventreceiver" {
-  project = var.project_id
-  role    = "roles/eventarc.eventReceiver"
-  member  = "serviceAccount:${google_service_account.processor.email}"
-}
-
-resource "google_project_iam_member" "processor_scheduler" {
-  project = var.project_id
-  role    = "roles/cloudscheduler.jobRunner"
-  member  = "serviceAccount:${google_service_account.processor.email}"
 }
