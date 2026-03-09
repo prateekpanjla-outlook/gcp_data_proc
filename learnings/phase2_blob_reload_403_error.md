@@ -106,3 +106,51 @@ gcloud logging read "resource.type=cloud_run_revision AND resource.labels.servic
 ## Related Files
 - `src/github_archive/phase2_process_files/writers/ndjson_writer.py` - Fixed with try-except
 - `infrastructure/phase2_process_files/terraform/layers/01_static/main.tf` - IAM permissions
+
+---
+
+## Issue 2: 403 Error When Reprocessing Existing Files
+
+### Date
+2026-03-08
+
+### Symptom
+When reprocessing a file that already has output in the staging bucket, the processor fails with:
+```
+Processing failed: ('Request failed with status code', 403, 'Expected one of', <HTTPStatus.OK: 200>, <HTTPStatus.PERMANENT_REDIRECT: 308>)
+```
+
+This error **only occurs when the output file already exists** in the staging bucket. New files process successfully.
+
+### Root Cause
+The processor service account was granted `roles/storage.objectCreator` which only allows **creating NEW objects**. It does NOT include `storage.objects.delete` permission required to overwrite existing objects.
+
+GCS upload operations require `storage.objects.delete` when the destination object already exists.
+
+### Solution
+Change the IAM role from `objectCreator` to `objectAdmin`:
+
+**Quick fix via gsutil:**
+```bash
+gsutil iam ch serviceAccount:dev-github-archive-processor@PROJECT_ID.iam.gserviceaccount.com:roles/storage.objectAdmin gs://STAGING_BUCKET
+```
+
+**Terraform fix** (`layers/01_static/main.tf`):
+```hcl
+resource "google_storage_bucket_iam_member" "processor_staging_write" {
+  bucket = google_storage_bucket.staging.name
+  role   = "roles/storage.objectAdmin"  # Changed from objectCreator
+  member = "serviceAccount:${google_service_account.processor.email}"
+}
+```
+
+### Role Comparison
+
+| Role | Create | Delete | Overwrite |
+|------|--------|--------|-----------|
+| `objectCreator` | ✅ | ❌ | ❌ |
+| `objectViewer` | ❌ | ❌ | ❌ |
+| `objectAdmin` | ✅ | ✅ | ✅ |
+
+### Lesson Learned
+When designing for reprocessing/idempotency, the service account needs `objectAdmin` (or custom role with `storage.objects.delete`) to handle existing output files.

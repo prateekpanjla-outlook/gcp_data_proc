@@ -1,33 +1,74 @@
 # Layer 02: First-time Resources
 # These resources require APIs to be enabled first
 # Apply once, re-apply only if changes are needed
+#
+# NOTE: Service Agent IAM bindings moved to Layer 02
+# These require APIs to be enabled first (eventarc, bigquery, storage.googleapis.com)
 
-# NOTE: Eventarc service agent IAM bindings moved to Layer 02
-# because Eventarc triggers can APIs to be enabled first
-
-# (they require the Eventarc APIs to be enabled in a state)
-
-# so we use Layer 02 outputs to instead
-
-# API enablement
+# =============================================================================
+# Data Sources - Remote State from Layer 01
+# =============================================================================
 data "terraform_remote_state" "static" {
   backend = "local"
-
   config = {
     path = "../01_static/terraform.tfstate"
   }
 }
 
-data "terraform_remote_state" "first_time" {
-  backend = "local"
-  config = {
-    path = "../02_first_time/terraform.tfstate"
+# =============================================================================
+# Locals
+# =============================================================================
+locals {
+  env_prefix = var.environment
+  common_labels = {
+    environment = var.environment
+    phase       = "bigquery_loader"
+    managed_by  = "terraform"
+    layer       = "first_time"
   }
 }
 
-data "terraform_remote_state" "phase2_static" {
-  backend = "local"
-  config = {
-    path = "../phase2_process_files/terraform/layers/01_static/terraform.tfstate"
-  }
+# =============================================================================
+# IAM: BigQuery Data Editor (on dataset)
+# =============================================================================
+resource "google_bigquery_dataset_iam_member" "bq_loader_data_editor" {
+  dataset_id = var.dataset_id
+  project    = var.project_id
+  role       = "roles/bigquery.dataEditor"
+  member     = "serviceAccount:${data.terraform_remote_state.static.outputs.service_account_email_bq_loader}"
+  depends_on = [data.terraform_remote_state.static]
 }
+
+# =============================================================================
+# IAM: BigQuery Job User (project-level)
+# =============================================================================
+resource "google_project_iam_member" "bq_loader_job_user" {
+  project = var.project_id
+  role    = "roles/bigquery.jobUser"
+  member  = "serviceAccount:${data.terraform_remote_state.static.outputs.service_account_email_bq_loader}"
+  depends_on = [data.terraform_remote_state.static]
+}
+
+# =============================================================================
+# IAM: Storage Object Viewer (staging bucket)
+# =============================================================================
+resource "google_storage_bucket_iam_member" "bq_loader_staging_viewer" {
+  bucket = var.staging_bucket_name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${data.terraform_remote_state.static.outputs.service_account_email_bq_loader}"
+  depends_on = [data.terraform_remote_state.static]
+}
+
+# =============================================================================
+# IAM: Storage Object Admin (for deleting files after load)
+# =============================================================================
+resource "google_storage_bucket_iam_member" "bq_loader_staging_admin" {
+  bucket = var.staging_bucket_name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${data.terraform_remote_state.static.outputs.service_account_email_bq_loader}"
+  depends_on = [data.terraform_remote_state.static]
+}
+
+# NOTE: Cloud Run IAM binding moved to Layer 03 (operational)
+# The IAM binding for the Cloud Run service must be created after the service exists.
+# Layer 03 creates the Cloud Run service and then applies the IAM binding.

@@ -1,24 +1,36 @@
-# Layer 02: First-time Resources
-# These resources are created once when APIs are enabled first
-# After that, resources are on existing state
+# =============================================================================
+# Variables: Layer 02 First-time
+# =============================================================================
 
-#
-# Note: Service Agent IAM bindings moved to Layer 02
-# These require APIs to be enabled first (eventarc, bigquery APIs, storage.googleapis.com)
+variable "project_id" {
+  description = "GCP project ID"
+  type        = string
+}
+
+variable "region" {
+  description = "GCP region"
+  type        = string
+}
+
+variable "environment" {
+  description = "Environment name (dev, prod)"
+  type        = string
+}
 
 variable "staging_bucket_name" {
   description = "Name of the staging bucket from Phase 2"
   type        = string
 }
 
-variable "eventarc_ack_deadline_seconds" {
-  description = "Pub/Sub acknowledgement deadline for Eventarc trigger (max 600 seconds)"
-  type        = number
-  default     = 600
+variable "dataset_id" {
+  description = "BigQuery dataset ID"
+  type        = string
+  default     = "github_archive"
+}
 
-  validation {
-    condition     = var.eventarc_ack_deadline_seconds >= 10 && var.eventarc_ack_deadline_seconds <= 600
-    error_message = "Eventarc ack deadline must be between 10 and 600 seconds"
-  }
+variable "table_id" {
+  description = "BigQuery table ID"
+  type        = string
+  default     = "github_events"
 }
 

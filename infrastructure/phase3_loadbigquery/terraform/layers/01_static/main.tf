@@ -66,8 +66,8 @@ resource "google_bigquery_table" "github_events" {
 # Service Account: BigQuery Loader
 # =============================================================================
 resource "google_service_account" "bq_loader" {
-  account_id   = local.phase3_resources.bq_loader_service_account
-  display_name = "${title(var.environment)} BigQuery Loader"
+  account_id   = local.phase3_resources["bq_loader_service_account"]
+  display_name = "${var.environment} BigQuery Loader"
   description  = "Service account for BigQuery loader Cloud Run service"
   project      = var.project_id
 }
@@ -76,7 +76,7 @@ resource "google_service_account" "bq_loader" {
 # Service Account: Eventarc Invoker
 # =============================================================================
 resource "google_service_account" "eventarc_invoker" {
-  account_id   = local.phase3_resources.eventarc_invoker
+  account_id   = local.phase3_resources["eventarc_invoker"]
   display_name = "${title(var.environment)} Eventarc Invoker (BQ)"
   description  = "Service account for Eventarc trigger authentication to BigQuery loader"
   project      = var.project_id
@@ -127,4 +127,22 @@ resource "google_project_iam_member" "eventarc_invoker_event_receiver" {
   project = var.project_id
   role    = "roles/eventarc.eventReceiver"
   member  = "serviceAccount:${google_service_account.eventarc_invoker.email}"
+}
+
+# =============================================================================
+# IAM: Service Account User (actAs) for Terraform Deployer
+# =============================================================================
+# Required for terraform deployer SA to attach eventarc_invoker SA to Eventarc trigger
+# This grants iam.serviceAccounts.actAs permission
+resource "google_service_account_iam_member" "terraform_actas_eventarc_invoker" {
+  service_account_id = google_service_account.eventarc_invoker.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${var.environment}-terraform-deployer@${var.project_id}.iam.gserviceaccount.com"
+}
+
+# Also allow terraform deployer to act as bq_loader SA (for Cloud Function runtime)
+resource "google_service_account_iam_member" "terraform_actas_bq_loader" {
+  service_account_id = google_service_account.bq_loader.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${var.environment}-terraform-deployer@${var.project_id}.iam.gserviceaccount.com"
 }

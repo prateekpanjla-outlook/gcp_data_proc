@@ -1,48 +1,18 @@
 # Layer 03: Operational Resources
-# These resources change frequently with code updates
-# Apply daily/weekly when deploying new code
+# Cloud Functions 2nd gen for BigQuery load triggered by GCS events
+#
+# This layer creates:
+# - Cloud Functions 2nd gen function with built-in Eventarc trigger
+# - Source bucket for function code
+# - IAM for GCS service account (pubsub.publisher)
+#
+# Dependencies:
+# - Layer 01_static: Service accounts, BigQuery dataset
+# - Layer 02_first_time: IAM bindings for bq_loader SA
 
-terraform {
-  required_version = ">= 1.5"
-  required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 7.0"
-    }
-  }
-}
-
-# Using local backend for development
-  # backend "gcs" {
-  #   bucket         = "REPLACE_WITH_TERRAFORM_STATE_BUCKET"
-    #   prefix         = "terraform/state/phase3-operational"
-  # }
-  # Using local backend for development
-}
-
-  provider "google" {
-    project = var.project_id
-    region  = var.region
-  }
-}
-
-  # Using previous version of hashicorp/google
-  version = "~> 7.0"
-    }
-  }
-}
-
-  # backend "gcs" {
-    #   bucket         = "REPLACE_WITH_TERRAFORM_STATE_BUCKET"
-    #   prefix         = "terraform/state/phase3-operational"
-  # }
-  # Using local backend for development
-  # backend "gcs" {
-    #   bucket = "REPLACE_WITH_TERRAFORM_STATE_BUCKET"
-    #   prefix         = "terraform/state/phase3-operational"
-  # }
-}
-
+# =============================================================================
+# Data Sources - Remote State
+# =============================================================================
 data "terraform_remote_state" "static" {
   backend = "local"
   config = {
@@ -57,15 +27,21 @@ data "terraform_remote_state" "first_time" {
   }
 }
 
+# Get GCS service account for Pub/Sub publishing
+data "google_storage_project_service_account" "gcs_account" {
+}
+
+# Get project info
+data "google_project" "project" {
+}
+
 # =============================================================================
 # Locals
+# =============================================================================
 locals {
-  env_prefix = var.environment
-
-  phase3_resources = {
-    bq_loader_service_account = "${local.env_prefix}-bq-loader"
-    eventarc_invoker_sa = = "${local.env_prefix}-eventarc-invoker"
-  }
+  env_prefix      = var.environment
+  function_name   = "${local.env_prefix}-bq-loader"
+  source_bucket   = "${var.project_id}-${local.env_prefix}-gcf-source"
   common_labels = {
     environment = var.environment
     phase       = "bigquery_loader"
@@ -75,97 +51,125 @@ locals {
 }
 
 # =============================================================================
-# BigQuery Dataset and Table
+# IAM: GCS Service Account needs Pub/Sub Publisher for events
 # =============================================================================
-
-# Note: Schema autodetect is on first load, then we lock schema via explicit definition.
-# This resources use schema autodetect initially for simplicity.
-
-# Schema from Phase 2 is defined in bigquery_schema.json
-# Schema can be updated/locked schema version
-# via explicit schema update.
-# Schema will be passed to Cloud Run as an variable.
-
-# Schema autodetect can cause issues with schema changes.
-# We explicit schema for reproducibility and schema evolution.
-resource "google_bigquery_table" "github_events" {
-  dataset_id = google_bigquery_dataset.github_archive.dataset_id
-  table_id   = var.table_id
-  deletion_protection = false
-  location    = var.region
-
-  project     = var.project_id
-
-  # Partitioning by created_at (DATE type)
-  time_partitioning {
-    type  = "DAY"
-    field = "created_at"
-    expiration_ms = var.partition_expiration_days * 24 * 60 * 60 * 1000
-  }
-
-  # Clustering by event_type for query optimization
-  clustering = ["event_type"]
-
-  # Use the schema from Phase 2
-  # Note: The schema is defined in phase2_process_files/schemas/bigquery_schema.json
-  schema = file("${path.module}/schemas/bigquery_schema.json")
-
+# Required for GCS to publish events to Pub/Sub (used by Eventarc)
+resource "google_project_iam_member" "gcs_pubsub_publisher" {
+  project = var.project_id
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${data.google_storage_project_service_account.gcs_account.email_address}"
 }
 
+# =============================================================================
+# IAM: bq_loader SA needs Artifact Registry reader for Cloud Build
+# =============================================================================
+resource "google_project_iam_member" "bq_loader_artifactregistry" {
+  project = var.project_id
+  role    = "roles/artifactregistry.reader"
+  member  = "serviceAccount:${data.terraform_remote_state.static.outputs.service_account_email_bq_loader}"
 }
 
-  # Schema will be passed to Cloud Run as an variable
-  # Schema autodetect can cause issues with schema changes.
-  # We explicit schema for reproducibility and schema evolution.
-  # resource "google_bigquery_table" "github_events" {
-    dataset_id = google_bigquery_dataset.github_archive.dataset_id
-    table_id   = var.table_id
-    deletion_protection = false
-    location    = var.region
-    project     = var.project_id
-
-    # Partitioning by created_at (DATE type)
-    time_partitioning {
-    type  = "DAY"
-    field = "created_at"
-    expiration_ms = var.partition_expiration_days * 24 * 60 * 60 * 1000
-  }
-
-  # Clustering by event_type for query optimization
-  clustering = ["event_type"]
-
-  # Use this schema from Phase 2
-  # Note: The schema is defined in phase2_process_files/schemas/bigquery_schema.json
-  # Schema will be passed to Cloud Run as environment variable
-  schema = file("${path.module}/schemas/bigquery_schema.json")
-
-  }
-  EOF
-  ])
+# =============================================================================
+# IAM: Eventarc invoker SA needs run.invoker for Cloud Functions 2nd gen
+# =============================================================================
+# Cloud Functions 2nd gen runs on Cloud Run, so the trigger SA needs invoker role
+resource "google_project_iam_member" "eventarc_invoker_run" {
+  project = var.project_id
+  role    = "roles/run.invoker"
+  member  = "serviceAccount:${data.terraform_remote_state.static.outputs.service_account_email_eventarc_invoker}"
 }
+
+# =============================================================================
+# Storage: Source bucket for function code
+# =============================================================================
+resource "google_storage_bucket" "source" {
+  name                        = local.source_bucket
+  location                    = var.region
+  uniform_bucket_level_access = true
+  force_destroy               = var.environment == "dev"
 
   labels = local.common_labels
 }
 
+# =============================================================================
+# Storage: Upload function source code
+# =============================================================================
+resource "google_storage_bucket_object" "source" {
+  name   = "function-source-${filemd5("${path.module}/../../../function-source/main.py")}.zip"
+  bucket = google_storage_bucket.source.name
+  source = data.archive_file.function_source.output_path
+
+  depends_on = [data.archive_file.function_source]
+}
+
+# Archive the function source code
+data "archive_file" "function_source" {
+  type        = "zip"
+  output_path = "${path.module}/function-source.zip"
+  source_dir  = "${path.module}/../../../function-source"
+}
+
+# =============================================================================
+# Cloud Functions 2nd gen: BigQuery Loader
+# =============================================================================
+resource "google_cloudfunctions2_function" "bq_loader" {
+  name        = local.function_name
+  location    = var.region
+  description = "Loads processed GitHub Archive files from GCS to BigQuery"
+
+  labels = local.common_labels
+
+  # Wait for IAM permissions to propagate
   depends_on = [
-    data.terraform_remote_state.static,
-    data.terraform_remote_state.first_time
+    google_project_iam_member.gcs_pubsub_publisher,
+    google_project_iam_member.bq_loader_artifactregistry,
+    google_project_iam_member.eventarc_invoker_run,
   ]
-}
 
-  lifecycle {
-    prevent_destroy = true
-  }
-}
+  build_config {
+    runtime     = "python311"
+    entry_point = "load_to_bigquery"
 
-  # Keep table for 7 days (retention)
-  lifecycle_rule {
-    condition {
-      age = var.partition_expiration_days
+    source {
+      storage_source {
+        bucket = google_storage_bucket.source.name
+        object = google_storage_bucket_object.source.name
+      }
     }
-    action {
-      type = "Delete"
+
+    environment_variables = {
+      BUILD_ENV = var.environment
     }
   }
-}
+
+  service_config {
+    max_instance_count  = var.max_instances
+    min_instance_count  = 0
+    available_memory    = var.function_memory
+    timeout_seconds     = var.function_timeout
+    available_cpu       = "1"
+
+    environment_variables = {
+      PROJECT_ID        = var.project_id
+      DATASET_ID        = var.dataset_id
+      TABLE_ID          = var.table_id
+      DELETE_AFTER_LOAD = tostring(var.delete_after_load)
+    }
+
+    ingress_settings                = "ALLOW_INTERNAL_ONLY"
+    all_traffic_on_latest_revision  = true
+    service_account_email           = data.terraform_remote_state.static.outputs.service_account_email_bq_loader
+  }
+
+  event_trigger {
+    trigger_region        = var.region
+    event_type            = "google.cloud.storage.object.v1.finalized"
+    retry_policy          = "RETRY_POLICY_RETRY"
+    service_account_email = data.terraform_remote_state.static.outputs.service_account_email_eventarc_invoker
+
+    event_filters {
+      attribute = "bucket"
+      value     = var.staging_bucket_name
+    }
+  }
 }
