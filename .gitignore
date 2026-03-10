@@ -71,5 +71,13 @@ Thumbs.db
 .terraform/
 *.tfvars
 !example.tfvars
+*.tfplan
+tfplan
+function-source.zip
+
 # Script logs
 logs/
+
+# Local test files
+local_test_files/
+tail
