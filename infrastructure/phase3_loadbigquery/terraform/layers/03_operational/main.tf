@@ -95,7 +95,7 @@ resource "google_storage_bucket" "source" {
 # Storage: Upload function source code
 # =============================================================================
 resource "google_storage_bucket_object" "source" {
-  name   = "function-source-${filemd5("${path.module}/../../../function-source/main.py")}.zip"
+  name   = "function-source-${filemd5("${path.module}/../../../../src/phase3_loadbigquery/main.py")}.zip"
   bucket = google_storage_bucket.source.name
   source = data.archive_file.function_source.output_path
 
@@ -106,7 +106,7 @@ resource "google_storage_bucket_object" "source" {
 data "archive_file" "function_source" {
   type        = "zip"
   output_path = "${path.module}/function-source.zip"
-  source_dir  = "${path.module}/../../../function-source"
+  source_dir  = "${path.module}/../../../../src/phase3_loadbigquery"
 }
 
 # =============================================================================
