@@ -46,7 +46,7 @@ ADD COLUMN IF NOT EXISTS etl_create_id STRING OPTIONS(description='ETL processor
 
 ### 2. Terraform Schema Update (schema.json)
 
-**File**: `infrastructure/phase3_loadbigquery/terraform/layers/01_static/schema.json`
+**File**: `infrastructure/github_archive/phase3_loadbigquery/terraform/layers/01_static/schema.json`
 
 **Rationale**: Keep Terraform state in sync with the actual BigQuery table schema. This prevents drift and ensures future `terraform plan` operations show accurate results.
 
