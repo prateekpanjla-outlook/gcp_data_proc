@@ -10,7 +10,7 @@ TABLE_ID="github_events"
 TABLE_ID_NEW="github_events_v2"
 
 # Get schema from Terraform state
-SCHEMA_FILE=$(dirname "$0")/infrastructure/phase3_loadbigquery/terraform/layers/01_static/schema.json
+SCHEMA_FILE=$(dirname "$0")/../terraform/layers/01_static/schema.json
 
 # Initialize BigQuery client
 bq_client = bigquery.Client(project=PROJECT_ID)

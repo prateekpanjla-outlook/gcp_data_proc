@@ -162,7 +162,6 @@ Complete data flow for processing a single `.gz` file from GitHub Archive throug
 |-----------|------|
 | Main Entry | [`src/github_archive/main.py`](src/github_archive/main.py) |
 | Processor | [`src/github_archive/processor.py`](src/github_archive/processor.py) |
-| Pandas Processor | [`src/processors/github_processor.py`](src/processors/github_processor.py) |
 | Schemas | [`src/github_archive/schemas.py`](src/github_archive/schemas.py) |
 | BQ Client | [`src/shared/bigquery_emulator_client.py`](src/shared/bigquery_emulator_client.py) |
 | Retry Logic | [`src/shared/retry.py`](src/shared/retry.py) |

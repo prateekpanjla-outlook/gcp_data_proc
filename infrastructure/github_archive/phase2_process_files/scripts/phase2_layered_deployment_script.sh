@@ -24,7 +24,7 @@ echo ""
 # =============================================================================
 # Configuration
 # =============================================================================
-TERRAFORM_DIR="${PROJECT_ROOT}/infrastructure/phase2_process_files/terraform"
+TERRAFORM_DIR="${PROJECT_ROOT}/infrastructure/github_archive/phase2_process_files/terraform"
 SRC_DIR="${PROJECT_ROOT}/src/github_archive/phase2_process_files"
 LOG_DIR="${SCRIPT_DIR}/logs"
 
@@ -55,7 +55,6 @@ STATE_BUCKET="${STATE_BUCKET:-${PROJECT_ID}-terraform-state}"
 
 # Docker image names
 PROCESSOR_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/github-archive/processor"
-SPLITTER_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/github-archive/file-splitter"
 
 # Layers
 LAYER_STATIC="${TERRAFORM_DIR}/layers/01_static"
@@ -280,14 +279,6 @@ build_docker_images() {
     log "Pushing processor image..."
     docker push "${PROCESSOR_IMAGE}:${IMAGE_TAG}" 2>&1 | while IFS= read -r line; do log "  [docker] $line"; done
     docker push "${PROCESSOR_IMAGE}:latest" 2>&1 | while IFS= read -r line; do log "  [docker] $line"; done
-
-    # Build splitter image
-    log "Building splitter image: ${SPLITTER_IMAGE}:${IMAGE_TAG}"
-    docker build -f Dockerfile.splitter -t "${SPLITTER_IMAGE}:${IMAGE_TAG}" . 2>&1 | while IFS= read -r line; do log "  [docker] $line"; done
-    docker tag "${SPLITTER_IMAGE}:${IMAGE_TAG}" "${SPLITTER_IMAGE}:latest"
-    log "Pushing splitter image..."
-    docker push "${SPLITTER_IMAGE}:${IMAGE_TAG}" 2>&1 | while IFS= read -r line; do log "  [docker] $line"; done
-    docker push "${SPLITTER_IMAGE}:latest" 2>&1 | while IFS= read -r line; do log "  [docker] $line"; done
 
     success "Docker images built and pushed"
 }

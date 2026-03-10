@@ -19,7 +19,6 @@ STATE_BUCKET="${STATE_BUCKET:-${PROJECT_ID}-terraform-state}"
 
 # Docker image names
 PROCESSOR_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/github-archive/processor"
-SPLITTER_IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/github-archive/file-splitter"
 
 # Layers
 LAYER_STATIC="${TERRAFORM_DIR}/layers/01_static"
@@ -212,13 +211,6 @@ build_docker_images() {
     docker tag "${PROCESSOR_IMAGE}:${IMAGE_TAG}" "${PROCESSOR_IMAGE}:latest"
     docker push "${PROCESSOR_IMAGE}:${IMAGE_TAG}"
     docker push "${PROCESSOR_IMAGE}:latest"
-
-    # Build splitter image
-    log "Building splitter image..."
-    docker build -f Dockerfile.splitter -t "${SPLITTER_IMAGE}:${IMAGE_TAG}" .
-    docker tag "${SPLITTER_IMAGE}:${IMAGE_TAG}" "${SPLITTER_IMAGE}:latest"
-    docker push "${SPLITTER_IMAGE}:${IMAGE_TAG}"
-    docker push "${SPLITTER_IMAGE}:latest"
 
     success "Docker images built and pushed"
 }

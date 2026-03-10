@@ -70,7 +70,7 @@ fi
 # =============================================================================
 # Terraform Configuration
 # =============================================================================
-TERRAFORM_DIR="${PROJECT_ROOT}/infrastructure/phase1_ingestion/terraform"
+TERRAFORM_DIR="${PROJECT_ROOT}/infrastructure/github_archive/phase1_ingestion/terraform"
 SA_ID="${ENVIRONMENT}-terraform-deployer"
 SA_EMAIL="${SA_ID}@${PROJECT_ID}.iam.gserviceaccount.com"
 KEY_FILE="${PROJECT_ROOT}/infrastructure/secrets/terraform/${SA_ID}-${PROJECT_ID}.json"

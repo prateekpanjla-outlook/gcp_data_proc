@@ -576,7 +576,7 @@ def load_dataframe(
 ```
 
 ### Updated Processor
-Modified `process_storage_to_bigquery()` in [github_processor.py](../src/processors/github_processor.py) to support both methods:
+Modified processor to support both bulk load and streaming methods:
 
 ```python
 def process_storage_to_bigquery(
