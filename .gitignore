@@ -81,3 +81,7 @@ logs/
 # Local test files
 local_test_files/
 tail
+
+# Terraform deployer service account keys
+*-terraform-deployer-key.json
+*-terraform-deployer-key.json.backup

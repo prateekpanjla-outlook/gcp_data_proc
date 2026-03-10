@@ -3,9 +3,9 @@
 
 steps:
   # Build the GitHub Archive downloader image for Cloud Run Job
+  # Cloud Build automatically pushes images when they're listed in the 'images' section
   - name: 'gcr.io/cloud-builders/docker'
     id: 'build-gh-downloader'
-    dir: 'src/github_archive/phase1_ingestion'
     args:
       - 'build'
       - '-t'
@@ -14,13 +14,9 @@ steps:
       - 'Dockerfile'
       - '.'
 
-  # Push image to Artifact Registry (build step pushes automatically)
-  - name: 'gcr.io/cloud-builders/docker'
-    id: 'push-image'
-    args:
-      - 'push'
-      - 'gcr.io/$PROJECT_ID/github-archive-downloader:latest'
-
-# Images built by this pipeline
+# Cloud Build will automatically push these images after successful build
 images:
   - 'gcr.io/$PROJECT_ID/github-archive-downloader:latest'
+
+# Build timeout
+timeout: '1200s'

@@ -44,8 +44,15 @@ resource "google_service_account" "scheduler" {
 # Cloud Scheduler Service Agent IAM
 # ==============================================================================
 # Get project number for Cloud Scheduler service agent reference
-data "google_project" "current" {
-  project_id = var.project_id
+# Temporarily commented out due to API propagation delay
+# data "google_project" "current" {
+#   project_id = var.project_id
+# }
+
+# Use hardcoded project number for now (592311283460)
+# TODO: Uncomment data source above after APIs are fully propagated
+locals {
+  project_number = "592311283460"
 }
 
 # Allows Cloud Scheduler service agent to generate OAuth/OIDC tokens for scheduler SA
@@ -53,5 +60,5 @@ data "google_project" "current" {
 resource "google_service_account_iam_member" "scheduler_token_creator" {
   service_account_id = google_service_account.scheduler.name
   role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
+  member             = "serviceAccount:service-${local.project_number}@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
 }
