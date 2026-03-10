@@ -61,5 +61,5 @@ variable "max_instances" {
 variable "delete_after_load" {
   description = "Delete source file after successful BigQuery load"
   type        = bool
-  default     = true
+  default     = false
 }

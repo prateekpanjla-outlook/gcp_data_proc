@@ -128,6 +128,14 @@ resource "google_cloud_run_v2_service" "processor" {
 
   labels = local.common_labels
 
+  # Allow Cloud Build to update the image without Terraform reverting it
+  # This separates infrastructure management (Terraform) from application deployment (Cloud Build)
+  lifecycle {
+    ignore_changes = [
+      template[0].containers[0].image
+    ]
+  }
+
   depends_on = [
     data.terraform_remote_state.static,
     data.terraform_remote_state.first_time

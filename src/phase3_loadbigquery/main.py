@@ -202,13 +202,8 @@ def load_file() -> tuple[Dict[str, Any], int]:
 
         logger.info(f"Load successful: rows={rows_loaded}, duration={duration:.2f}s")
 
-        # Delete source file after successful load
-        try:
-            delete_source_file(bucket, file_name)
-            logger.info(f"Deleted source file: {file_name}")
-        except Exception as delete_error:
-            logger.warning(f"Failed to delete source file: {delete_error}")
-            # Continue despite delete failure
+        # Note: Source files are retained in staging bucket and deleted by bucket lifecycle policy
+        # (see staging_retention_days variable in Terraform)
 
         return jsonify({
             'status': 'success',
@@ -266,22 +261,8 @@ def extract_date_partition(file_name: str) -> str:
     return None
 
 
-def delete_source_file(bucket_name: str, file_name: str) -> None:
-    """
-    Delete a file from GCS after successful BigQuery load.
-
-    Args:
-        bucket_name: GCS bucket name
-        file_name: GCS file path
-
-    Raises:
-        Exception: If deletion fails
-    """
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(file_name)
-
-    blob.delete()
-    logger.info(f"Deleted: gs://{bucket_name}/{file_name}")
+# Note: File deletion is handled by GCS bucket lifecycle policy (staging_retention_days)
+# This keeps files for a configurable period before automatic deletion
 
 
 # =============================================================================

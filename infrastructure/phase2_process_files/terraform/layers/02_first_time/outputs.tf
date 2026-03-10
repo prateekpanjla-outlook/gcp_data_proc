@@ -35,6 +35,22 @@ output "apis_enabled" {
     "cloudresourcemanager.googleapis.com",
     "iam.googleapis.com",
     "logging.googleapis.com",
-    "monitoring.googleapis.com"
+    "monitoring.googleapis.com",
+    "cloudbuild.googleapis.com"
   ]
+}
+
+output "cloud_build_trigger_id" {
+  description = "ID of the Cloud Build trigger for Phase 2 processor"
+  value       = google_cloudbuild_trigger.phase2_processor.id
+}
+
+output "cloud_build_trigger_name" {
+  description = "Name of the Cloud Build trigger for Phase 2 processor"
+  value       = google_cloudbuild_trigger.phase2_processor.name
+}
+
+output "cloud_build_sa_email" {
+  description = "Email of the Cloud Build service account"
+  value       = google_service_account.cloudbuild_sa.email
 }

@@ -139,7 +139,7 @@ class GitHubArchiveFileProcessor:
         validation_result = validate_file(file_name, metadata.size)
         if not validation_result.is_valid:
             error_msg = '; '.join(validation_result.errors)
-            self.logger.log_file_error(file_name, f"File validation failed: {error_msg}")
+            self.logger.log_file_error(file_name, f"File validation failed test code change: {error_msg}")
             return FileProcessingResult(
                 success=False,
                 input_file=input_gcs_path,

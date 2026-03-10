@@ -94,6 +94,12 @@ resource "google_project_service" "monitoring" {
   disable_on_destroy = false
 }
 
+resource "google_project_service" "cloudbuild" {
+  project            = var.project_id
+  service            = "cloudbuild.googleapis.com"
+  disable_on_destroy = false
+}
+
 # =============================================================================
 # IAM: Service Agents (depends on APIs enabled above)
 # =============================================================================
@@ -134,4 +140,161 @@ resource "google_artifact_registry_repository" "docker_repo" {
   }
 
   labels = local.common_labels
+}
+
+# =============================================================================
+# Cloud Build Trigger for Phase 2 Processor
+# =============================================================================
+# This trigger allows Cloud Build to build and deploy the processor service
+# The trigger is manual by default but can be connected to GitHub for automation
+resource "google_cloudbuild_trigger" "phase2_processor" {
+  name        = "${var.environment}-phase2-processor"
+  description = "Build and deploy Phase 2 GitHub Archive processor"
+  location    = var.region
+
+  # Manual trigger - can be invoked via gcloud builds submit or connected to GitHub
+  # To connect to GitHub, add github {} block with owner, name, and push/pull_request config
+
+  # Build configuration inline (alternative: use filename to reference cloudbuild.yaml)
+  build {
+    # Step 1: Build the Docker image
+    step {
+      name = "gcr.io/cloud-builders/docker"
+      args = [
+        "build",
+        "-t",
+        "${var.region}-docker.pkg.dev/${var.project_id}/github-archive/processor:$SHORT_SHA",
+        "-t",
+        "${var.region}-docker.pkg.dev/${var.project_id}/github-archive/processor:latest",
+        "-f",
+        "Dockerfile.processor",
+        "."
+      ]
+    }
+
+    # Step 2: Push images to Artifact Registry
+    step {
+      name = "gcr.io/cloud-builders/docker"
+      args = [
+        "push",
+        "--all-tags",
+        "${var.region}-docker.pkg.dev/${var.project_id}/github-archive/processor"
+      ]
+    }
+
+    # Step 3: Deploy to Cloud Run
+    step {
+      name = "gcr.io/cloud-builders/gcloud"
+      entrypoint = "bash"
+      args = [
+        "-c",
+        <<-EOT
+          gcloud run deploy ${var.environment}-github-archive-processor \
+            --image ${var.region}-docker.pkg.dev/${var.project_id}/github-archive/processor:$SHORT_SHA \
+            --platform managed \
+            --region ${var.region} \
+            --memory 4Gi \
+            --cpu 2 \
+            --timeout 3600 \
+            --max-instances 5 \
+            --concurrency 10 \
+            --no-allow-unauthenticated \
+            --service-account ${var.environment}-github-archive-processor@${var.project_id}.iam.gserviceaccount.com \
+            --set-env-vars PROJECT_ID=${var.project_id},LANDING_BUCKET=${var.project_id}-${var.environment}-github-archive-landing,STAGING_BUCKET=${var.project_id}-${var.environment}-github-archive-staging
+        EOT
+      ]
+    }
+
+    # Images to push to Artifact Registry
+    images = [
+      "${var.region}-docker.pkg.dev/${var.project_id}/github-archive/processor:$SHORT_SHA",
+      "${var.region}-docker.pkg.dev/${var.project_id}/github-archive/processor:latest"
+    ]
+
+    # Build options
+    options {
+      logging = "CLOUD_LOGGING_ONLY"
+    }
+  }
+
+  # Use the dedicated Cloud Build service account
+  service_account = google_service_account.cloudbuild_sa.id
+
+  # Substitutions for the build
+  substitutions = {
+    _REGION = var.region
+  }
+
+  # Tags for annotation (Cloud Build triggers use tags, not labels)
+  tags = [
+    "environment:${var.environment}",
+    "phase:processing",
+    "managed-by:terraform"
+  ]
+
+  depends_on = [
+    google_project_service.cloudbuild,
+    google_artifact_registry_repository.docker_repo,
+  ]
+}
+
+# =============================================================================
+# Cloud Build Service Account
+# =============================================================================
+# Dedicated service account for Cloud Build operations
+resource "google_service_account" "cloudbuild_sa" {
+  account_id   = "${var.environment}-cloud-build"
+  display_name = "${var.environment} Cloud Build"
+  description  = "Service account for Cloud Build to deploy Phase 2 and Phase 3 services"
+  project      = var.project_id
+}
+
+# Grant Cloud Build roles to the service account
+resource "google_project_iam_member" "cloudbuild_builder" {
+  project = var.project_id
+  role    = "roles/cloudbuild.builds.builder"
+  member  = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
+}
+
+resource "google_project_iam_member" "cloudbuild_artifactregistry_writer" {
+  project = var.project_id
+  role    = "roles/artifactregistry.writer"
+  member  = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
+}
+
+resource "google_project_iam_member" "cloudbuild_logging" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
+}
+
+resource "google_project_iam_member" "cloudbuild_run_developer" {
+  project = var.project_id
+  role    = "roles/run.developer"
+  member  = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
+}
+
+resource "google_project_iam_member" "cloudbuild_storage_admin" {
+  project = var.project_id
+  role    = "roles/storage.objectAdmin"
+  member  = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
+}
+
+# Cloud Functions developer (for Phase 3)
+resource "google_project_iam_member" "cloudbuild_functions_developer" {
+  project = var.project_id
+  role    = "roles/cloudfunctions.developer"
+  member  = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
+}
+
+# =============================================================================
+# IAM: Cloud Build SA can act as runtime service accounts
+# =============================================================================
+# This allows Cloud Build to deploy services using the runtime service accounts
+# Note: The processor SA is created in Layer 01_static, so this creates a dependency
+# For first-time setup, apply Layer 01 first, then re-apply Layer 02 to add this binding
+resource "google_service_account_iam_member" "cloudbuild_actas_processor" {
+  service_account_id = "projects/${var.project_id}/serviceAccounts/${var.environment}-github-archive-processor@${var.project_id}.iam.gserviceaccount.com"
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
 }

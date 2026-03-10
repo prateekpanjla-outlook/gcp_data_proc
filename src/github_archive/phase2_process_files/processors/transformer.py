@@ -156,6 +156,10 @@ class GitHubEventTransformer:
         # Extract deeply nested fields (e.g., payload.issue.labels)
         result = self._merge_extracted_nested(result, df, ['payload', 'issue'], ISSUE_FIELD_MAPPING)
 
+        # Add ETL metadata columns
+        result['etl_create_ts'] = pd.Timestamp.now(tz='UTC')
+        result['etl_create_id'] = "GITHUB_PROCESSOR"
+
         return result
 
     def _merge_extracted(
@@ -300,7 +304,8 @@ class GitHubEventTransformer:
             'actor_type', 'actor_url',
             'repo_name', 'repo_url',
             'payload_ref', 'payload_ref_type',
-            'payload_head', 'payload_before'
+            'payload_head', 'payload_before',
+            'etl_create_id'
         ]
 
         for col in string_cols:

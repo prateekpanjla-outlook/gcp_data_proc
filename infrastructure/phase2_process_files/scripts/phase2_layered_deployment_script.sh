@@ -96,6 +96,7 @@ Other Options:
   --env ENVIRONMENT       Environment: dev or prod (default: dev)
   --image-tag TAG         Docker image tag to deploy (default: latest)
   --skip-build            Skip Docker image build
+  --use-cloud-build       Use Cloud Build instead of local Docker (recommended)
   --skip-apply            Skip terraform apply (plan only)
   --plan-only             Only run terraform plan
   --destroy               Destroy resources instead of create/update
@@ -103,10 +104,13 @@ Other Options:
   -h, --help              Show this help
 
 Examples:
-  # First time setup (all layers)
-  $0 --layer all
+  # First time setup (all layers) with Cloud Build
+  $0 --layer all --use-cloud-build
 
-  # Daily code update (operational layer only)
+  # Daily code update using Cloud Build (recommended)
+  $0 --layer operational --use-cloud-build
+
+  # Daily code update using local Docker
   $0 --layer operational --image-tag v1.2.3
 
   # IAM changes (static layer only)
@@ -288,6 +292,44 @@ build_docker_images() {
     success "Docker images built and pushed"
 }
 
+trigger_cloud_build() {
+    log "Triggering Cloud Build for Phase 2 processor..."
+
+    local cloudbuild_config="${SRC_DIR}/cloudbuild.yaml"
+    local build_sa="${ENVIRONMENT}-cloud-build@${PROJECT_ID}.iam.gserviceaccount.com"
+
+    # Check if cloudbuild.yaml exists
+    if [ ! -f "${cloudbuild_config}" ]; then
+        error "cloudbuild.yaml not found at ${cloudbuild_config}"
+    fi
+
+    log "Using Cloud Build config: ${cloudbuild_config}"
+    log "Service account: ${build_sa}"
+
+    # Get current git commit hash for tagging (if in a git repo)
+    local commit_hash="local"
+    if git rev-parse --short HEAD &>/dev/null; then
+        commit_hash=$(git rev-parse --short HEAD)
+    fi
+
+    log "Submitting build to Cloud Build..."
+    log "Build source: ${SRC_DIR}"
+
+    # Submit build to Cloud Build
+    # Note: SHORT_SHA is automatically provided by Cloud Build
+    if gcloud builds submit \
+        --project="${PROJECT_ID}" \
+        --region="${REGION}" \
+        --config="${cloudbuild_config}" \
+        --substitutions="_REGION=${REGION},_ENVIRONMENT=${ENVIRONMENT}" \
+        --service-account="projects/${PROJECT_ID}/serviceAccounts/${build_sa}" \
+        "${SRC_DIR}" 2>&1 | while IFS= read -r line; do log "  [cloud-build] $line"; done; then
+        success "Cloud Build completed successfully"
+    else
+        error "Cloud Build failed"
+    fi
+}
+
 show_outputs() {
     local layer=$1
 
@@ -401,6 +443,7 @@ main() {
     PLAN_ONLY=false
     DESTROY=false
     OUTPUTS_ONLY=false
+    USE_CLOUD_BUILD=false
     IMAGE_TAG="latest"
 
     while [[ $# -gt 0 ]]; do
@@ -419,6 +462,10 @@ main() {
                 ;;
             --skip-build)
                 SKIP_BUILD=true
+                shift
+                ;;
+            --use-cloud-build)
+                USE_CLOUD_BUILD=true
                 shift
                 ;;
             --skip-apply)
@@ -475,7 +522,13 @@ main() {
     # Build Docker images (skip for static/first-time layers unless explicitly requested)
     if [ "$SKIP_BUILD" = false ]; then
         if [ "$LAYER" = "all" ] || [ "$LAYER" = "operational" ] || [ "$LAYER" = "03" ]; then
-            build_docker_images
+            if [ "$USE_CLOUD_BUILD" = true ]; then
+                log "Using Cloud Build for image build and deployment..."
+                trigger_cloud_build
+            else
+                log "Using local Docker for image build..."
+                build_docker_images
+            fi
         else
             log "Skipping Docker build for layer: ${LAYER}"
         fi
