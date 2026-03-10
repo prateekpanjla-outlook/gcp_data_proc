@@ -93,8 +93,6 @@ def mock_storage_client(temp_dir):
 
     Uses local filesystem to simulate Cloud Storage operations.
     """
-    from src.shared.storage_client import StorageClient
-
     class MockBlob:
         def __init__(self, path, base_dir):
             self.path = path
