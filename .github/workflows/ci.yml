@@ -108,8 +108,8 @@ jobs:
       - name: Build and push image
         run: |
           cd src/github_archive
-          gcloud builds submit --tag gcr.io/$PROJECT_ID/github-archive-processor:${{ github.sha }} .
-          gcloud container images add-tag gcr.io/$PROJECT_ID/github-archive-processor:${{ github.sha }} gcr.io/$PROJECT_ID/github-archive-processor:latest -q
+          gcloud builds submit --tag ${{ env.REGION }}-docker.pkg.dev/$PROJECT_ID/data-pipeline/github-archive-processor:${{ github.sha }} .
+          gcloud container images add-tag ${{ env.REGION }}-docker.pkg.dev/$PROJECT_ID/data-pipeline/github-archive-processor:${{ github.sha }} gcr.io/$PROJECT_ID/github-archive-processor:latest -q
         env:
           PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
 
@@ -129,8 +129,8 @@ jobs:
       - name: Build and push image
         run: |
           cd src/hacker_news
-          gcloud builds submit --tag gcr.io/$PROJECT_ID/hn-processor:${{ github.sha }} .
-          gcloud container images add-tag gcr.io/$PROJECT_ID/hn-processor:${{ github.sha }} gcr.io/$PROJECT_ID/hn-processor:latest -q
+          gcloud builds submit --tag ${{ env.REGION }}-docker.pkg.dev/$PROJECT_ID/data-pipeline/hn-processor:${{ github.sha }} .
+          gcloud container images add-tag ${{ env.REGION }}-docker.pkg.dev/$PROJECT_ID/data-pipeline/hn-processor:${{ github.sha }} gcr.io/$PROJECT_ID/hn-processor:latest -q
         env:
           PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
 
@@ -151,7 +151,7 @@ jobs:
       - name: Deploy GitHub Archive Processor
         run: |
           gcloud run deploy github-archive-processor \
-            --image gcr.io/$PROJECT_ID/github-archive-processor:${{ github.sha }} \
+            --image ${{ env.REGION }}-docker.pkg.dev/$PROJECT_ID/data-pipeline/github-archive-processor:${{ github.sha }} \
             --region $REGION \
             --memory 2Gi \
             --cpu 1 \
@@ -165,7 +165,7 @@ jobs:
       - name: Deploy Hacker News Processor
         run: |
           gcloud run deploy hn-processor \
-            --image gcr.io/$PROJECT_ID/hn-processor:${{ github.sha }} \
+            --image ${{ env.REGION }}-docker.pkg.dev/$PROJECT_ID/data-pipeline/hn-processor:${{ github.sha }} \
             --region $REGION \
             --memory 1Gi \
             --cpu 1 \
@@ -179,7 +179,7 @@ jobs:
       - name: Deploy Hacker News Fetcher
         run: |
           gcloud run deploy hn-fetcher \
-            --image gcr.io/$PROJECT_ID/hn-fetcher:${{ github.sha }} \
+            --image ${{ env.REGION }}-docker.pkg.dev/$PROJECT_ID/data-pipeline/hn-fetcher:${{ github.sha }} \
             --region $REGION \
             --memory 512Mi \
             --max-instances 10 \

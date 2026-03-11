@@ -20,9 +20,9 @@ steps:
     args:
       - 'build'
       - '-t'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/github-archive/processor:${SHORT_SHA}'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/data-pipeline/processor:${SHORT_SHA}'
       - '-t'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/github-archive/processor:latest'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/data-pipeline/processor:latest'
       - '-f'
       - 'Dockerfile.processor'
       - '.'
@@ -33,7 +33,7 @@ steps:
     args:
       - 'push'
       - '--all-tags'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/github-archive/processor'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/data-pipeline/processor'
 
   # Deploy to Cloud Run
   # Settings aligned with Terraform Layer 03 operational configuration
@@ -43,8 +43,8 @@ steps:
     args:
       - '-c'
       - |
-        gcloud run deploy ${_ENVIRONMENT}-github-archive-processor \
-          --image ${_REGION}-docker.pkg.dev/$PROJECT_ID/github-archive/processor:${SHORT_SHA} \
+        gcloud run deploy ${_ENVIRONMENT}-data-pipeline-processor \
+          --image ${_REGION}-docker.pkg.dev/$PROJECT_ID/data-pipeline/processor:${SHORT_SHA} \
           --platform managed \
           --region ${_REGION} \
           --memory 4Gi \
@@ -53,13 +53,13 @@ steps:
           --max-instances 5 \
           --concurrency 10 \
           --no-allow-unauthenticated \
-          --service-account ${_ENVIRONMENT}-github-archive-processor@$PROJECT_ID.iam.gserviceaccount.com \
-          --set-env-vars PROJECT_ID=$PROJECT_ID,LANDING_BUCKET=$PROJECT_ID-${_ENVIRONMENT}-github-archive-landing,STAGING_BUCKET=$PROJECT_ID-${_ENVIRONMENT}-github-archive-staging
+          --service-account ${_ENVIRONMENT}-data-pipeline-processor@$PROJECT_ID.iam.gserviceaccount.com \
+          --set-env-vars PROJECT_ID=$PROJECT_ID,LANDING_BUCKET=$PROJECT_ID-${_ENVIRONMENT}-data-pipeline-landing,STAGING_BUCKET=$PROJECT_ID-${_ENVIRONMENT}-data-pipeline-staging
 
 # Image names for Artifact Registry
 images:
-  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/github-archive/processor:${SHORT_SHA}'
-  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/github-archive/processor:latest'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/data-pipeline/processor:${SHORT_SHA}'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/data-pipeline/processor:latest'
 
 # Build options
 options:

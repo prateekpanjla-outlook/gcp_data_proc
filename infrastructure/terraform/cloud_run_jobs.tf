@@ -56,7 +56,7 @@ resource "google_cloud_run_v2_job" "github_archive_processor" {
   template {
     template {
       containers {
-        image = "gcr.io/${var.project_id}/github-archive-processor:${var.image_tag}"
+        image = "${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/github-archive-processor:${var.image_tag}"
 
         env {
           name  = "BUCKET_NAME"
@@ -121,7 +121,7 @@ resource "google_cloud_run_v2_job" "hacker_news_fetcher" {
   template {
     template {
       containers {
-        image = "gcr.io/${var.project_id}/hn-fetcher:${var.image_tag}"
+        image = "${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/hn-fetcher:${var.image_tag}"
 
         env {
           name  = "BUCKET_NAME"
@@ -163,7 +163,7 @@ resource "google_cloud_run_v2_job" "hacker_news_processor" {
   template {
     template {
       containers {
-        image = "gcr.io/${var.project_id}/hn-processor:${var.image_tag}"
+        image = "${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/hn-processor:${var.image_tag}"
 
         env {
           name  = "BUCKET_NAME"
@@ -210,7 +210,7 @@ resource "google_cloud_run_v2_job" "dlq_processor" {
   template {
     template {
       containers {
-        image = "gcr.io/${var.project_id}/dlq-processor:${var.image_tag}"
+        image = "${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/dlq-processor:${var.image_tag}"
 
         env {
           name  = "PROJECT_ID"

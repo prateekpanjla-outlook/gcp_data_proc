@@ -16,7 +16,7 @@ resource "google_cloud_run_v2_job" "github_archive_downloader" {
         # Custom image built from src/github_archive/phase1_ingestion/Dockerfile
         # Includes: google-cloud-sdk + coreutils + download.sh script
         # Build with: gcloud builds submit --config=config/cloudbuild-phase1.yaml .
-        image = "gcr.io/${var.project_id}/github-archive-downloader:latest"
+        image = "${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/github-archive-downloader:latest"
 
         # Environment variables
         env {

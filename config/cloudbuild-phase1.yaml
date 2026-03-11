@@ -9,14 +9,14 @@ steps:
     args:
       - 'build'
       - '-t'
-      - 'gcr.io/$PROJECT_ID/github-archive-downloader:latest'
+      - '$_REGION-docker.pkg.dev/$PROJECT_ID/data-pipeline/github-archive-downloader:latest'
       - '-f'
       - 'Dockerfile'
       - '.'
 
 # Cloud Build will automatically push these images after successful build
 images:
-  - 'gcr.io/$PROJECT_ID/github-archive-downloader:latest'
+  - '$_REGION-docker.pkg.dev/$PROJECT_ID/data-pipeline/github-archive-downloader:latest'
 
 # Build timeout
 timeout: '1200s'

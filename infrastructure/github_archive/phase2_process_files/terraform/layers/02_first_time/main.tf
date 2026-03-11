@@ -131,7 +131,7 @@ resource "google_project_iam_member" "eventarc_event_receiver" {
 # =============================================================================
 resource "google_artifact_registry_repository" "docker_repo" {
   location      = var.region
-  repository_id = "github-archive"
+  repository_id = "data-pipeline"
   description   = "Docker repository for GitHub Archive processing images"
   format        = "DOCKER"
 
@@ -163,9 +163,9 @@ resource "google_cloudbuild_trigger" "phase2_processor" {
       args = [
         "build",
         "-t",
-        "${var.region}-docker.pkg.dev/${var.project_id}/github-archive/processor:$SHORT_SHA",
+        "${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/processor:$SHORT_SHA",
         "-t",
-        "${var.region}-docker.pkg.dev/${var.project_id}/github-archive/processor:latest",
+        "${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/processor:latest",
         "-f",
         "Dockerfile.processor",
         "."
@@ -178,7 +178,7 @@ resource "google_cloudbuild_trigger" "phase2_processor" {
       args = [
         "push",
         "--all-tags",
-        "${var.region}-docker.pkg.dev/${var.project_id}/github-archive/processor"
+        "${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/processor"
       ]
     }
 
@@ -189,8 +189,8 @@ resource "google_cloudbuild_trigger" "phase2_processor" {
       args = [
         "-c",
         <<-EOT
-          gcloud run deploy ${var.environment}-github-archive-processor \
-            --image ${var.region}-docker.pkg.dev/${var.project_id}/github-archive/processor:$SHORT_SHA \
+          gcloud run deploy ${var.environment}-data-pipeline-processor \
+            --image ${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/processor:$SHORT_SHA \
             --platform managed \
             --region ${var.region} \
             --memory 4Gi \
@@ -199,16 +199,16 @@ resource "google_cloudbuild_trigger" "phase2_processor" {
             --max-instances 5 \
             --concurrency 10 \
             --no-allow-unauthenticated \
-            --service-account ${var.environment}-github-archive-processor@${var.project_id}.iam.gserviceaccount.com \
-            --set-env-vars PROJECT_ID=${var.project_id},LANDING_BUCKET=${var.project_id}-${var.environment}-github-archive-landing,STAGING_BUCKET=${var.project_id}-${var.environment}-github-archive-staging
+            --service-account ${var.environment}-data-pipeline-processor@${var.project_id}.iam.gserviceaccount.com \
+            --set-env-vars PROJECT_ID=${var.project_id},LANDING_BUCKET=${var.project_id}-${var.environment}-data-pipeline-landing,STAGING_BUCKET=${var.project_id}-${var.environment}-data-pipeline-staging
         EOT
       ]
     }
 
     # Images to push to Artifact Registry
     images = [
-      "${var.region}-docker.pkg.dev/${var.project_id}/github-archive/processor:$SHORT_SHA",
-      "${var.region}-docker.pkg.dev/${var.project_id}/github-archive/processor:latest"
+      "${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/processor:$SHORT_SHA",
+      "${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/processor:latest"
     ]
 
     # Build options
@@ -294,7 +294,7 @@ resource "google_project_iam_member" "cloudbuild_functions_developer" {
 # Note: The processor SA is created in Layer 01_static, so this creates a dependency
 # For first-time setup, apply Layer 01 first, then re-apply Layer 02 to add this binding
 resource "google_service_account_iam_member" "cloudbuild_actas_processor" {
-  service_account_id = "projects/${var.project_id}/serviceAccounts/${var.environment}-github-archive-processor@${var.project_id}.iam.gserviceaccount.com"
+  service_account_id = "projects/${var.project_id}/serviceAccounts/${var.environment}-data-pipeline-processor@${var.project_id}.iam.gserviceaccount.com"
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
 }

@@ -120,14 +120,20 @@ resource "google_bigquery_dataset" "hacker_news" {
 # ==============================================================================
 # Artifact Registry for Container Images
 # ==============================================================================
-resource "google_artifact_registry_repository" "containers" {
+resource "google_artifact_registry_repository" "docker" {
   location      = var.region
   repository_id = "data-pipeline"
-  description   = "Docker images for data pipeline"
+  description   = "Docker repository for GitHub Archive data pipeline"
   format        = "DOCKER"
+  mode          = "STANDARD"
+
+  docker_config {
+    immutable_tags = false
+  }
 
   labels = {
     environment = var.environment
+    source      = "github-archive"
     managed_by  = "terraform"
   }
 }
@@ -338,7 +344,7 @@ resource "google_eventarc_trigger" "github_storage" {
   labels = {
     environment = var.environment
     source      = "github-archive"
-  ]
+  }
 }
 
 # Scheduler for Hacker News (fetch new stories every hour)

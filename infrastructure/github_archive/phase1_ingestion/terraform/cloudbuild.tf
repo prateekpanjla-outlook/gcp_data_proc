@@ -7,7 +7,7 @@
 
 # Locals for image references
 locals {
-  github_archive_downloader_image = "gcr.io/${var.project_id}/github-archive-downloader:latest"
+  github_archive_downloader_image = "${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/github-archive-downloader:latest"
   downloader_source_dir          = "${path.module}/../../../src/github_archive/phase1_ingestion"
   cloudbuild_config              = "${path.module}/../../../config/cloudbuild-phase1.yaml"
 }

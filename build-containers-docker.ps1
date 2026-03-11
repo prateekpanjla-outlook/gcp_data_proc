@@ -9,7 +9,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 $sourceDir = Join-Path $SCRIPT_DIR "src\github_archive\phase1_ingestion"
-$imageName = "gcr.io/$PROJECT_ID/github-archive-downloader:latest"
+$imageName = "us-central1-docker.pkg.dev/$PROJECT_ID/data-pipeline/github-archive-downloader:latest"
 
 Write-Host "Building image..." -ForegroundColor Yellow
 Write-Host "Source: $sourceDir" -ForegroundColor Cyan

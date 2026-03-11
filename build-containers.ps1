@@ -24,7 +24,7 @@ Write-Host "----------------------------------------" -ForegroundColor Yellow
 
 $sourceDir = Join-Path $SCRIPT_DIR "src\github_archive\phase1_ingestion"
 $configFile = Join-Path $SCRIPT_DIR "config\cloudbuild-phase1.yaml"
-$imageName = "gcr.io/$PROJECT_ID/github-archive-downloader:latest"
+$imageName = "us-central1-docker.pkg.dev/$PROJECT_ID/data-pipeline/github-archive-downloader:latest"
 
 # Check if source exists
 if (-not (Test-Path $sourceDir)) {
