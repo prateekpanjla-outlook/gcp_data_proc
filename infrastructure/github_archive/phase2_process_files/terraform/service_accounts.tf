@@ -51,27 +51,47 @@ resource "google_project_iam_member" "splitter_logging" {
 # IAM: Eventarc Service Agents
 # =============================================================================
 # Allow Cloud Storage service agent to publish events
+# The GCS service agent is created when storage API is enabled
 resource "google_project_iam_member" "storage_pubsub_publisher" {
   project = var.project_id
   role    = "roles/pubsub.publisher"
   member  = "serviceAccount:service-${data.google_project.current.number}@gs-project-accounts.iam.gserviceaccount.com"
+
+  depends_on = [null_resource.init_service_agents]
 }
 
 # Eventarc service agent
+# The Eventarc service agent is created by null_resource.init_service_agents
 resource "google_project_iam_member" "eventarc_event_receiver" {
   project = var.project_id
   role    = "roles/eventarc.eventReceiver"
   member  = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-eventarc.iam.gserviceaccount.com"
+
+  depends_on = [null_resource.init_service_agents]
 }
 
 # =============================================================================
 # IAM: Service Account to Service Account
 # =============================================================================
-# Allow Eventarc invoker to invoke Cloud Run service
+# Allow Eventarc invoker to invoke Cloud Run service (Error 17)
 resource "google_cloud_run_v2_service_iam_member" "eventarc_invoker_processor" {
   project  = var.project_id
   location = var.region
   name     = google_cloud_run_v2_service.processor.name
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.eventarc_invoker.email}"
+}
+
+# Eventarc invoker needs eventReceiver role (Error 12)
+resource "google_project_iam_member" "eventarc_invoker_event_receiver" {
+  project = var.project_id
+  role    = "roles/eventarc.eventReceiver"
+  member  = "serviceAccount:${google_service_account.eventarc_invoker.email}"
+}
+
+# Pub/Sub SA needs serviceAccountTokenCreator on invoker SA for OIDC tokens (Error 18)
+resource "google_service_account_iam_member" "pubsub_token_creator_eventarc_invoker" {
+  service_account_id = google_service_account.eventarc_invoker.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
 }

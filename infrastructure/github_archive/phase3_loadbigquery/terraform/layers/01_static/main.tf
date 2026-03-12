@@ -22,6 +22,23 @@ locals {
 }
 
 # =============================================================================
+# APIs: Enable required services
+# =============================================================================
+resource "google_project_service" "bigquery" {
+  project = var.project_id
+  service = "bigquery.googleapis.com"
+
+  disable_on_destroy = false
+}
+
+resource "google_project_service" "cloudfunctions" {
+  project = var.project_id
+  service = "cloudfunctions.googleapis.com"
+
+  disable_on_destroy = false
+}
+
+# =============================================================================
 # BigQuery Dataset
 # =============================================================================
 resource "google_bigquery_dataset" "github_archive" {
@@ -33,7 +50,9 @@ resource "google_bigquery_dataset" "github_archive" {
 
   labels = local.common_labels
 
-  delete_contents_on_destroy = var.environment == "dev"
+  delete_contents_on_destroy = contains(["dev", "test"], var.environment)
+
+  depends_on = [google_project_service.bigquery]
 }
 
 # =============================================================================
@@ -43,7 +62,6 @@ resource "google_bigquery_table" "github_events" {
   dataset_id          = google_bigquery_dataset.github_archive.dataset_id
   table_id            = var.table_id
   deletion_protection = false
-
   description = "GitHub Archive events with flattened structure"
 
   # Time-based partitioning by created_at
@@ -145,4 +163,14 @@ resource "google_service_account_iam_member" "terraform_actas_bq_loader" {
   service_account_id = google_service_account.bq_loader.name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${var.environment}-terraform-deployer@${var.project_id}.iam.gserviceaccount.com"
+}
+
+# =============================================================================
+# IAM: Pub/Sub SA needs serviceAccountTokenCreator on eventarc_invoker
+# =============================================================================
+# Required for Pub/Sub to generate OIDC tokens when delivering events (Phase 2 Error 18)
+resource "google_service_account_iam_member" "pubsub_token_creator_eventarc_invoker" {
+  service_account_id = google_service_account.eventarc_invoker.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
 }

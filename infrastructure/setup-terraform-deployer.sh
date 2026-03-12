@@ -129,6 +129,10 @@ roles=(
     "roles/run.admin"
     "roles/run.developer"
 
+    # Cloud Build
+    "roles/cloudbuild.builds.builder"
+    "roles/cloudbuild.builds.editor"
+
     # Cloud Functions
     "roles/cloudfunctions.admin"
 
@@ -140,8 +144,9 @@ roles=(
 
     # IAM and Service Accounts
     "roles/iam.serviceAccountAdmin"
-    # "roles/resourcemanager.projectIamAdmin" # WARNING: Overly permissive. Grants ability to change any project permission.
+    "roles/resourcemanager.projectIamAdmin"  # Required: Terraform needs this to manage IAM bindings on the project
     "roles/iam.serviceAccountUser"
+    "roles/iam.serviceAccountTokenCreator"   # Required: For Cloud Scheduler SA token creation
 
     # Cloud Scheduler
     "roles/cloudscheduler.admin"
@@ -276,11 +281,13 @@ grant_actas() {
 # Grant actAs for service accounts that will be created by Terraform
 # These may not exist yet, so we attempt and handle failures gracefully
 grant_actas "${ENVIRONMENT}-github-archive-downloader@${PROJECT_ID}.iam.gserviceaccount.com" "GitHub Archive Downloader"
-grant_actAs "${ENVIRONMENT}-github-archive-processor@${PROJECT_ID}.iam.gserviceaccount.com" "GitHub Archive Processor"
-grant_actAs "${ENVIRONMENT}-file-splitter@${PROJECT_ID}.iam.gserviceaccount.com" "File Splitter"
-grant_actAs "${ENVIRONMENT}-eventarc-invoker@${PROJECT_ID}.iam.gserviceaccount.com" "Eventarc Invoker"
-grant_actAs "${ENVIRONMENT}-bq-loader@${PROJECT_ID}.iam.gserviceaccount.com" "BigQuery Loader"
-grant_actAs "${ENVIRONMENT}-scheduler@${PROJECT_ID}.iam.gserviceaccount.com" "Scheduler"
+grant_actas "${ENVIRONMENT}-github-archive-processor@${PROJECT_ID}.iam.gserviceaccount.com" "GitHub Archive Processor"
+grant_actas "${ENVIRONMENT}-file-splitter@${PROJECT_ID}.iam.gserviceaccount.com" "File Splitter"
+grant_actas "${ENVIRONMENT}-eventarc-invoker@${PROJECT_ID}.iam.gserviceaccount.com" "Eventarc Invoker"
+grant_actas "${ENVIRONMENT}-bq-loader@${PROJECT_ID}.iam.gserviceaccount.com" "BigQuery Loader"
+grant_actas "${ENVIRONMENT}-eventarc-invoker-bq@${PROJECT_ID}.iam.gserviceaccount.com" "Eventarc Invoker BQ"
+grant_actas "${ENVIRONMENT}-scheduler@${PROJECT_ID}.iam.gserviceaccount.com" "Scheduler"
+grant_actas "${ENVIRONMENT}-cloud-build@${PROJECT_ID}.iam.gserviceaccount.com" "Cloud Build"
 
 log_success "Service account impersonation configured"
 

@@ -3,12 +3,16 @@ BigQuery Loader Cloud Function (2nd gen)
 
 Triggered by Cloud Storage events when files are finalized in the staging bucket.
 Loads .ndjson.gz files to BigQuery and optionally deletes the source file.
+
+Cloud Functions 2nd gen uses CloudEvents format, not the legacy (data, context) format.
 """
 
 import os
 import logging
 from google.cloud import bigquery
 from google.cloud import storage
+import functions_framework
+from cloudevents.http import CloudEvent
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -25,27 +29,24 @@ bq_client = bigquery.Client(project=PROJECT_ID)
 storage_client = storage.Client(project=PROJECT_ID)
 
 
-def load_to_bigquery(data, context):
+@functions_framework.cloud_event
+def load_to_bigquery(cloud_event: CloudEvent):
     """
-    Cloud Function entry point.
+    Cloud Function entry point (2nd gen CloudEvents format).
 
     Triggered by GCS object finalized event via Eventarc.
-    Uses background event format (data, context).
 
     Args:
-        data: The event data containing bucket and file info
-        context: The event context (event_id, timestamp, etc.)
-
-    Returns:
-        dict with status and message
+        cloud_event: CloudEvent containing GCS object metadata
     """
-    # Log context for debugging
-    logger.info(f"Event ID: {context.event_id}, Type: {context.event_type}")
+    # CloudEvents format: data is in cloud_event.data
+    data = cloud_event.data
 
     bucket_name = data.get("bucket")
     file_name = data.get("name")
     file_size = data.get("size", "unknown")
 
+    logger.info(f"Event ID: {cloud_event['id']}, Type: {cloud_event['type']}")
     logger.info(f"Processing event: bucket={bucket_name}, file={file_name}, size={file_size}")
 
     # Validate file extension

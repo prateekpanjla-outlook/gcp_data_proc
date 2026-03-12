@@ -13,14 +13,8 @@ resource "google_service_account" "cloudbuild_sa" {
 
 locals {
   cloud_build_sa_roles = toset([
-    # Submit builds by uploading tarball to Cloud Build
+    # Build, push images, read/write storage (includes artifactregistry.writer + storage.objectAdmin)
     "roles/cloudbuild.builds.builder",
-
-    # Push/pull images from Artifact Registry
-    "roles/artifactregistry.writer",
-
-    # Upload build source to GCS (tarball staging)
-    "roles/storage.objectAdmin",
 
     # Deploy Cloud Run services and jobs
     "roles/run.admin",

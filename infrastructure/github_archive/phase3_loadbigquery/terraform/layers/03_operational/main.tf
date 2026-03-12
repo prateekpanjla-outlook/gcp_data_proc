@@ -79,6 +79,9 @@ resource "google_project_iam_member" "eventarc_invoker_run" {
   member  = "serviceAccount:${data.terraform_remote_state.static.outputs.service_account_email_eventarc_invoker}"
 }
 
+# NOTE: Cloud Build SA (${environment}-cloud-build) already has
+# roles/cloudbuild.builds.builder from Phase 1 (includes AR writer + storage admin)
+
 # =============================================================================
 # Storage: Source bucket for function code
 # =============================================================================
@@ -86,7 +89,7 @@ resource "google_storage_bucket" "source" {
   name                        = local.source_bucket
   location                    = var.region
   uniform_bucket_level_access = true
-  force_destroy               = var.environment == "dev"
+  force_destroy               = contains(["dev", "test"], var.environment)
 
   labels = local.common_labels
 }
@@ -95,7 +98,7 @@ resource "google_storage_bucket" "source" {
 # Storage: Upload function source code
 # =============================================================================
 resource "google_storage_bucket_object" "source" {
-  name   = "function-source-${filemd5("${path.module}/../../../../src/github_archive/phase3_loadbigquery/main.py")}.zip"
+  name   = "function-source-${filemd5("${path.module}/../../../../../../src/github_archive/phase3_loadbigquery/main.py")}.zip"
   bucket = google_storage_bucket.source.name
   source = data.archive_file.function_source.output_path
 
@@ -106,7 +109,7 @@ resource "google_storage_bucket_object" "source" {
 data "archive_file" "function_source" {
   type        = "zip"
   output_path = "${path.module}/function-source.zip"
-  source_dir  = "${path.module}/../../../../src/github_archive/phase3_loadbigquery"
+  source_dir  = "${path.module}/../../../../../../src/github_archive/phase3_loadbigquery"
 }
 
 # =============================================================================
@@ -127,8 +130,9 @@ resource "google_cloudfunctions2_function" "bq_loader" {
   ]
 
   build_config {
-    runtime     = "python311"
-    entry_point = "load_to_bigquery"
+    runtime         = "python311"
+    entry_point     = "load_to_bigquery"
+    service_account = "projects/${var.project_id}/serviceAccounts/${var.environment}-cloud-build@${var.project_id}.iam.gserviceaccount.com"
 
     source {
       storage_source {

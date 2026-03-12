@@ -1,4 +1,4 @@
-# Phase 2: Process Files - Cloud Run Service
+# Phase 2: Process Files - Cloud Run Service (v2 Schema)
 
 # =============================================================================
 # Single Processor Service (handles both raw/ and chunks/)
@@ -8,77 +8,65 @@ resource "google_cloud_run_v2_service" "processor" {
   location = var.region
   project  = var.project_id
 
+  # Only internal traffic (Eventarc triggers)
+  ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+
   template {
-    metadata {
-      annotations = {
-        # Autoscaling
-        "autoscaling.knative.dev/maxScale"       = tostring(var.max_instances)
-        "autoscaling.knative.dev/minScale"       = "0"
-        "autoscaling.knative.dev/target"         = "10"
-        "autoscaling.knative.dev/scaleDownDelay" = "30s"
+    # v2: execution environment at template level
+    execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
 
-        # Performance
-        "run.googleapis.com/cpu-throttling"       = "false"
-        "run.googleapis.com/execution-environment" = "gen2"
+    # v2: timeout is a duration string, not timeout_seconds
+    timeout = "3600s"
 
-        # Health check
-        "run.googleapis.com/health-check-path" = "/health"
-        "run.googleapis.com/health-check-per-second" = "1"
-      }
+    # v2: max_instance_request_concurrency replaces container_concurrency
+    max_instance_request_concurrency = 10
+
+    service_account = google_service_account.processor.email
+
+    # v2: scaling inside template block (provider ~5.x)
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 5
     }
 
-    template {
-      containers {
-        # Image for the processor service
-        image = "${var.region}-docker.pkg.dev/${var.project_id}/${var.environment}-github-archive/processor:latest"
+    containers {
+      image = "${var.region}-docker.pkg.dev/${var.project_id}/${var.environment}-github-archive/processor:latest"
 
-        env {
-          name  = "PROJECT_ID"
-          value = var.project_id
-        }
-        env {
-          name  = "LANDING_BUCKET"
-          value = var.landing_bucket_name
-        }
-        env {
-          name  = "STAGING_BUCKET"
-          value = google_storage_bucket.staging.name
-        }
-        env {
-          name  = "FILE_SIZE_THRESHOLD_MB"
-          value = tostring(var.file_size_threshold_mb)
-        }
-        env {
-          name  = "CHUNKSIZE"
-          value = tostring(var.chunksize)
-        }
-        env {
-          name  = "PORT"
-          value = "8080"
-        }
-
-        resources {
-          limits = {
-            cpu    = tostring(var.processor_cpu)
-            memory = "${var.processor_memory}Gi"
-          }
-          requests = {
-            cpu    = "100m"
-            memory = "512Mi"
-          }
-        }
+      env {
+        name  = "PROJECT_ID"
+        value = var.project_id
       }
+      env {
+        name  = "LANDING_BUCKET"
+        value = var.landing_bucket_name
+      }
+      env {
+        name  = "STAGING_BUCKET"
+        value = google_storage_bucket.staging.name
+      }
+      env {
+        name  = "FILE_SIZE_THRESHOLD_MB"
+        value = tostring(var.file_size_threshold_mb)
+      }
+      env {
+        name  = "CHUNKSIZE"
+        value = tostring(var.chunksize)
+      }
+      # PORT is reserved in Cloud Run v2 - do NOT set it
 
-      container_concurrency = 10
-      timeout_seconds      = 3600  # 1 hour
-
-      service_account = google_service_account.processor.email
+      resources {
+        limits = {
+          cpu    = "2"
+          memory = "4Gi"
+        }
+        # v2: cpu_idle replaces requests block
+        cpu_idle = false
+      }
     }
   }
 
   labels = local.common_labels
 
-  depends_on = [
-    google_project_service.phase2_apis
-  ]
+  # Image must exist before Cloud Run service can be created
+  depends_on = [null_resource.build_processor_image]
 }

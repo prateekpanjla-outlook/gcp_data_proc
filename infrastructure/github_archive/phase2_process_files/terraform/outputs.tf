@@ -2,17 +2,12 @@
 
 output "processor_service_url" {
   description = "URL of the processor Cloud Run Service"
-  value = "https://${google_cloud_run_v2_service.processor.name}-${var.project_id}.${var.region}.run.app"
+  value = google_cloud_run_v2_service.processor.uri
 }
 
-output "main_file_trigger_name" {
-  description = "Name of the main file Eventarc trigger"
+output "storage_trigger_name" {
+  description = "Name of the storage Eventarc trigger"
   value = google_eventarc_trigger.main_file_processor.name
-}
-
-output "chunk_trigger_name" {
-  description = "Name of the chunk Eventarc trigger"
-  value = google_eventarc_trigger.chunk_processor.name
 }
 
 output "staging_bucket_name" {

@@ -16,8 +16,8 @@ variable "environment" {
   type        = string
 
   validation {
-    condition     = contains(["dev", "prod"], var.environment)
-    error_message = "Environment must be dev or prod"
+    condition     = contains(["dev", "test", "prod"], var.environment)
+    error_message = "Environment must be dev, test, or prod"
   }
 }
 
@@ -73,12 +73,17 @@ variable "max_instances" {
 variable "chunksize" {
   description = "Number of records per chunk for processing"
   type        = number
-  default     = 100_000
+  default     = 100000
 
   validation {
-    condition     = var.chunksize >= 10_000 && var.chunksize <= 1_000_000
+    condition     = var.chunksize >= 10000 && var.chunksize <= 1000000
     error_message = "Chunksize must be between 10,000 and 1,000,000"
   }
+}
+
+variable "deployer_sa_key_path" {
+  description = "The path to the JSON key file for the deployer service account, used for local-exec authentication."
+  type        = string
 }
 
 variable "staging_retention_days" {

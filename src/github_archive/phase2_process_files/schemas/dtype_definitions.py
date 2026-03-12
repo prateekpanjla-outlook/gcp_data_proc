@@ -297,7 +297,7 @@ BIGQUERY_SCHEMA: List[SchemaField] = [
     # Event identifiers
     SchemaField('event_id', 'STRING', mode='NULLABLE', description='Unique event identifier from GitHub Archive'),
     SchemaField('event_type', 'STRING', mode='NULLABLE', description='Type of GitHub event (PushEvent, IssuesEvent, etc.)'),
-    SchemaField('created_at', 'STRING', mode='NULLABLE', description='Event timestamp (ISO 8601 format)'),
+    SchemaField('created_at', 'TIMESTAMP', mode='NULLABLE', description='Event timestamp (ISO 8601 format)'),
 
     # Actor fields (from nested actor object)
     SchemaField('actor_id', 'INT64', mode='NULLABLE', description='GitHub user ID of the actor'),
@@ -343,6 +343,10 @@ BIGQUERY_SCHEMA: List[SchemaField] = [
         ],
         description='Issue labels as array of label objects'
     ),
+
+    # ETL metadata (added by transformer at runtime)
+    SchemaField('etl_create_ts', 'TIMESTAMP', mode='NULLABLE', description='Timestamp when Phase 2 processor created this record'),
+    SchemaField('etl_create_id', 'STRING', mode='NULLABLE', description='ETL processor identifier'),
 ]
 
 

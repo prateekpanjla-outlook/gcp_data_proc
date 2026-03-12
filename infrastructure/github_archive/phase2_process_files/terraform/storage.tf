@@ -7,7 +7,7 @@ resource "google_storage_bucket" "staging" {
   name          = local.phase2_resources.staging_bucket
   location      = var.region
   project       = var.project_id
-  force_destroy = var.environment == "dev"
+  force_destroy = contains(["dev", "test"], var.environment)
 
   uniform_bucket_level_access = true
 
@@ -35,7 +35,14 @@ resource "google_storage_bucket_iam_member" "processor_landing_read" {
 
 resource "google_storage_bucket_iam_member" "processor_staging_write" {
   bucket = google_storage_bucket.staging.name
-  role   = "roles/storage.objectCreator"
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.processor.email}"
+}
+
+# Processor SA: Read from staging bucket (for blob.reload, checking existing files)
+resource "google_storage_bucket_iam_member" "processor_staging_read" {
+  bucket = google_storage_bucket.staging.name
+  role   = "roles/storage.objectViewer"
   member = "serviceAccount:${google_service_account.processor.email}"
 }
 

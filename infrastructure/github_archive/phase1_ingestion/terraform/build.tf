@@ -24,12 +24,13 @@ resource "null_resource" "build_downloader_image" {
     # It first activates the service account, then submits the build.
     # The semicolon (;) acts as a command separator in PowerShell.
     command = format(
-      "gcloud auth activate-service-account --key-file=%s; gcloud builds submit %s --config %s --project=%s --substitutions=_REGION=%s --service-account=%s",
+      "gcloud auth activate-service-account --key-file=%s; gcloud builds submit %s --config %s --project=%s --substitutions='_REGION=%s,_ENV=%s' --service-account=%s",
       var.deployer_sa_key_path,
       "${path.module}/../../../../src/github_archive",
       "${path.module}/../../../../config/cloudbuild-phase1.yaml",
       var.project_id,
       var.region,
+      var.environment,
       google_service_account.cloudbuild_sa.name
     )
 
