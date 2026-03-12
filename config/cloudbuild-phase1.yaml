@@ -20,3 +20,7 @@ images:
 
 # Build timeout
 timeout: '1200s'
+
+# Specify logging behavior, required when using a custom service account.
+options:
+  logging: CLOUD_LOGGING_ONLY

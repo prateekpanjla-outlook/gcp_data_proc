@@ -139,6 +139,48 @@ resource "google_artifact_registry_repository" "docker" {
 }
 
 # ==============================================================================
+# Cloud Run Jobs
+# ==============================================================================
+
+resource "google_cloud_run_v2_job" "github_archive_downloader" {
+  name     = "${var.environment}-github-archive-download-gsutil"
+  location = var.region
+  project  = var.project_id
+
+  template {
+    template {
+      containers {
+        image = "${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/github-archive-downloader:latest"
+
+        env {
+          name  = "ENVIRONMENT"
+          value = var.environment
+        }
+        env {
+          name  = "PROJECT_ID"
+          value = var.project_id
+        }
+        env {
+          name  = "BUCKET_NAME"
+          value = google_storage_bucket.github_archive_landing.name
+        }
+        env {
+          name  = "HOURS_AGO"
+          value = "1"
+        }
+      }
+      service_account = google_service_account.github_archive_downloader.email
+    }
+  }
+
+  labels = {
+    environment = var.environment
+    source      = "github-archive"
+    managed_by  = "terraform"
+  }
+}
+
+# ==============================================================================
 # Cloud Run Services
 # ==============================================================================
 

@@ -3,7 +3,7 @@
 FROM gcr.io/google.com/cloudsdktool/google-cloud-cli:slim
 
 # Copy the download script into the container.
-COPY scripts/download.sh /scripts/download.sh
+COPY phase1_ingestion/scripts/download.sh /scripts/download.sh
 
 # Make the script executable.
 RUN chmod +x /scripts/download.sh

@@ -25,8 +25,8 @@ LOCAL_OUTPUT_DIR="${LOCAL_OUTPUT_DIR:-./tmp}"
 GITHUB_ARCHIVE_BASE="https://data.gharchive.org"
 
 # Validate environment
-if [[ ! "${ENVIRONMENT}" =~ ^(local|dev|prod)$ ]]; then
-  echo "Error: ENVIRONMENT must be 'local', 'dev', or 'prod', got: ${ENVIRONMENT}"
+if [[ ! "${ENVIRONMENT}" =~ ^(local|dev|test|prod)$ ]]; then
+  echo "Error: ENVIRONMENT must be 'local', 'dev', test,or 'prod', got: ${ENVIRONMENT}"
   exit 1
 fi
 

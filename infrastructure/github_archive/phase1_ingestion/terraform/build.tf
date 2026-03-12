@@ -5,23 +5,35 @@
 resource "null_resource" "build_downloader_image" {
   # This build depends on the Artifact Registry repository existing first.
   depends_on = [
-    google_artifact_registry_repository.data_pipeline_repo
+    google_artifact_registry_repository.data_pipeline_repo,
+    google_project_iam_member.cloudbuild_sa_roles
   ]
 
   # The 'triggers' block ensures that the build is re-run whenever the
   # source code changes. We create a hash of the Dockerfile and the download script.
   triggers = {
-    dockerfile_hash = filesha256("${path.module}/../../../../src/github_archive/Dockerfile")
-    # Assuming the download script is at src/github_archive/scripts/download.sh
-    # based on the Dockerfile content.
-    script_hash = filesha256("${path.module}/../../../../src/github_archive/phase1_ingestion/scripts/download.sh")
+    dockerfile_hash   = filesha256("${path.module}/../../../../src/github_archive/Dockerfile")
+    script_hash       = filesha256("${path.module}/../../../../src/github_archive/phase1_ingestion/scripts/download.sh")
+    cloudbuild_config = filesha256("${path.module}/../../../../config/cloudbuild-phase1.yaml")
   }
 
   # The provisioner executes a command on the machine running Terraform.
   # It requires 'gcloud' to be installed and authenticated.
   provisioner "local-exec" {
-    # This command builds the Docker container using Cloud Build and tags it
-    # with the name expected by the Cloud Run Job resource.
-    command = "gcloud builds submit --tag ${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/github-archive-downloader:latest ${path.module}/../../../../src/github_archive"
+    # The command is a single string formatted with all necessary variables.
+    # It first activates the service account, then submits the build.
+    # The semicolon (;) acts as a command separator in PowerShell.
+    command = format(
+      "gcloud auth activate-service-account --key-file=%s; gcloud builds submit %s --config %s --project=%s --substitutions=_REGION=%s --service-account=%s",
+      var.deployer_sa_key_path,
+      "${path.module}/../../../../src/github_archive",
+      "${path.module}/../../../../config/cloudbuild-phase1.yaml",
+      var.project_id,
+      var.region,
+      google_service_account.cloudbuild_sa.name
+    )
+
+    # Use PowerShell to execute the formatted command string.
+    interpreter = ["powershell", "-Command"]
   }
 }

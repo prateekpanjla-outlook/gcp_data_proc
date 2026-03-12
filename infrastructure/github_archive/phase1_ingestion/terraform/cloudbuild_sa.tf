@@ -1,6 +1,6 @@
 #
 # Manages the dedicated service account for Cloud Build.
-# This SA is used by the Cloud Build trigger to build and deploy the processor service.
+# This SA is used by the Cloud Build trigger to build and deploy services.
 # It replaces the default Compute Engine service account for better security.
 #
 
@@ -23,10 +23,9 @@ locals {
 }
 
 # Grant all required roles to the dedicated Cloud Build service account
-# using a for_each loop for better maintainability.
 resource "google_project_iam_member" "cloudbuild_sa_roles" {
   for_each = local.cloud_build_sa_roles
   project  = var.project_id
   role     = each.key
-  member  = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
+  member   = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
 }

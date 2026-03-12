@@ -38,3 +38,8 @@ variable "bucket_lifecycle_days" {
     error_message = "Lifecycle days must be at least 1."
   }
 }
+
+variable "deployer_sa_key_path" {
+  description = "The path to the JSON key file for the deployer service account, used for local-exec authentication."
+  type        = string
+}
