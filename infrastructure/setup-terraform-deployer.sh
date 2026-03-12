@@ -153,7 +153,7 @@ roles=(
 
     # IAM and Service Accounts
     "roles/iam.serviceAccountAdmin"
-    "roles/resourcemanager.projectIamAdmin"
+    # "roles/resourcemanager.projectIamAdmin" # WARNING: Overly permissive. Grants ability to change any project permission.
     "roles/iam.serviceAccountUser"
 
     # Cloud Scheduler
@@ -164,10 +164,6 @@ roles=(
 
     # Pub/Sub
     "roles/pubsub.admin"
-
-    # Cloud Build (for deploying application code)
-    "roles/cloudbuild.builds.builder"
-    "roles/cloudbuild.builds.viewer"
 
     # Service Usage (to enable/disable APIs)
     "roles/servicemanagement.serviceViewer"

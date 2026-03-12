@@ -1,28 +1,18 @@
-# Cloud Run Job: GitHub Archive Downloader
-# Uses google-cloud-sdk base image with gsutil for streaming downloads
-
+# Use the official Google Cloud SDK image as a base.
+# This image includes gcloud, gsutil, curl, and other necessary tools.
 FROM gcr.io/google.com/cloudsdktool/google-cloud-cli:slim
 
-# Install additional utilities if needed
-# Coreutils includes date with -d option for time calculations
-RUN apt-get update && apt-get install -y \
-    coreutils \
-    && rm -rf /var/lib/apt/lists/*
+# Set the working directory inside the container
+WORKDIR /app
 
-# Copy download script
-COPY scripts/download.sh /scripts/download.sh
-RUN chmod +x /scripts/download.sh
+# --- THE FIX ---
+# Copy the download script from its full path within the build context.
+# The build context is 'src/github_archive/', so the script is located at
+# 'phase1_ingestion/scripts/download.sh' relative to that context root.
+COPY phase1_ingestion/scripts/download.sh .
 
-# Set environment variables (can be overridden at runtime)
-ENV BUCKET_NAME=""
-ENV PROJECT_ID=""
-ENV HOURS_AGO="1"
-ENV GOOGLE_APPLICATION_CREDENTIALS=""
+# Make the script executable
+RUN chmod +x download.sh
 
-# Set entrypoint
-ENTRYPOINT ["/scripts/download.sh"]
-
-# Labels
-LABEL description="GitHub Archive hourly downloader using gsutil"
-LABEL version="1.0"
-LABEL component="github-archive-ingestion"
+# Set the entrypoint for the container to run the download script
+ENTRYPOINT ["./download.sh"]

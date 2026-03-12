@@ -6,7 +6,7 @@
 resource "google_artifact_registry_repository" "data_pipeline_repo" {
   project       = var.project_id
   location      = var.region
-  repository_id = "data-pipeline"
+  repository_id = "github-archive"
   description   = "Docker repository for data pipeline images"
   format        = "DOCKER"
 }

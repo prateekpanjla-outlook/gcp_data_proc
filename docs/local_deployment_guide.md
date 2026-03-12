@@ -162,7 +162,7 @@ gcloud auth activate-service-account --key-file=/tmp/github-archive-downloader-k
 
 ```bash
 export PROJECT_ID="your-project-id"
-export BUCKET_NAME="${PROJECT_ID}-data-pipeline"
+export BUCKET_NAME="${PROJECT_ID}-test-github-archive-landing" # Use your env, e.g. 'dev' or 'test'
 export HOURS_AGO="1"
 ```
 
