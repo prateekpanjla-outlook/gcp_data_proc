@@ -82,7 +82,7 @@ resource "google_cloud_run_v2_service" "processor" {
 
     containers {
       # Image for the processor service
-      image = "${var.region}-docker.pkg.dev/${var.project_id}/github-archive/processor:${var.image_tag}"
+      image = "${var.region}-docker.pkg.dev/${var.project_id}/${var.environment}-github-archive/processor:${var.image_tag}"
 
       env {
         name  = "PROJECT_ID"

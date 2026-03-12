@@ -7,46 +7,45 @@ Phase 3 implements the data loading layer that loads processed NDJSON files from
 ## Architecture
 
 ```mermaid
-flowchart TB
+graph TB
     subgraph Storage["Storage Layer"]
-        SB[GCS Staging Bucket<br/>github-archive-staging]
+        SB[GCS Staging Bucket<br>github-archive-staging]
+        SRC[GCS Source Bucket<br>gcf-source]
     end
 
     subgraph Eventarc["Event Routing"]
-        ET[Eventarc Trigger<br/>storage.object.v1.finalized]
+        ET[Eventarc Trigger<br>storage.object.v1.finalized]
     end
 
     subgraph Compute["Compute Layer"]
-        CF2[Cloud Functions 2nd gen<br/>bq-loader]
-        SRC[Source bucket]
+        CF2[Cloud Functions 2nd gen<br>bq-loader]
     end
 
     subgraph IAM["Identity"]
-        SA1[Service Account<br/>bq-loader]
-        SA2[Service Account<br/>eventarc-invoker-bq]
+        SA1[Service Account<br>bq-loader]
+        SA2[Service Account<br>eventarc-invoker-bq]
     end
 
     subgraph BigQuery["Data Warehouse"]
-        BQ[BigQuery Dataset<br/>github_archive]
-        T[BigQuery Table<br/>github_events]
+        BQ[BigQuery Dataset<br>github_archive]
+        T[BigQuery Table<br>github_events]
     end
-
-    subgraph Flow["Data Flow"]
-        direction="auto"
 
     SB -->|"file finalized"| ET
     ET -->|"POST event"| CF2
-    CF2 -->|"load job"| BQ
-    CF2 -->|"append"| T
+    CF2 -->|"load job"| T
     CF2 -->|"delete source"| SB
+    SRC -->|"function source"| CF2
 
-    BQ -->|"query"| T
+    CF2 -.->|"runs as"| SA1
+    ET -.->|"invokes as"| SA2
+    T --> BQ
 
     style SB fill:#fff3e0,stroke:#333
     style ET fill:#e3f2fd,stroke:#333
     style CF2 fill:#e8f5e9,stroke:#333
     style BQ fill:#e1bee9,stroke:#333
-    style T fill:#f3e0,stroke:#333
+    style T fill:#f3e5f5,stroke:#333
 ```
 
 ## Components
@@ -109,6 +108,7 @@ flowchart TB
 | `roles/storage.objectViewer` | Staging Bucket | Read source files |
 | `roles/storage.objectAdmin` | Staging Bucket | Delete files after load |
 | `roles/logging.logWriter` | Project | Write logs |
+| `roles/monitoring.metricWriter` | Project | Write metrics |
 | `roles/artifactregistry.reader` | Project | Read container images |
 
 ### Service Account: `{env}-eventarc-invoker-bq`

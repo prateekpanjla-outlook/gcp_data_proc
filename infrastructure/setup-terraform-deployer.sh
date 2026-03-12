@@ -96,31 +96,18 @@ log_info "=========================================="
 log_info "Creating Service Account"
 log_info "=========================================="
 
-# Check if SA already exists
+# Delete and recreate SA if it already exists
 if gcloud iam service-accounts describe "$DEPLOYER_SA_EMAIL" --project="$PROJECT_ID" >/dev/null 2>&1; then
-    log_warning "Service account $DEPLOYER_SA_EMAIL already exists"
-    read -p "Do you want to recreate it? This will revoke existing permissions. (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        log_info "Deleting existing service account..."
-        gcloud iam service-accounts delete "$DEPLOYER_SA_EMAIL" --project="$PROJECT_ID" --quiet || true
-        log_info "Creating new service account..."
-        gcloud iam service-accounts create "$DEPLOYER_SA_ID" \
-            --display-name="${ENVIRONMENT} Terraform Deployer" \
-            --description="Service account for deploying GitHub Archive infrastructure with Terraform" \
-            --project="$PROJECT_ID"
-        log_success "Service account recreated"
-    else
-        log_info "Keeping existing service account"
-    fi
-else
-    log_info "Creating service account: $DEPLOYER_SA_EMAIL"
-    gcloud iam service-accounts create "$DEPLOYER_SA_ID" \
-        --display-name="${ENVIRONMENT} Terraform Deployer" \
-        --description="Service account for deploying GitHub Archive infrastructure with Terraform" \
-        --project="$PROJECT_ID"
-    log_success "Service account created"
+    log_warning "Service account $DEPLOYER_SA_EMAIL already exists, recreating..."
+    gcloud iam service-accounts delete "$DEPLOYER_SA_EMAIL" --project="$PROJECT_ID" --quiet || true
 fi
+
+log_info "Creating service account: $DEPLOYER_SA_EMAIL"
+gcloud iam service-accounts create "$DEPLOYER_SA_ID" \
+    --display-name="${ENVIRONMENT} Terraform Deployer" \
+    --description="Service account for deploying GitHub Archive infrastructure with Terraform" \
+    --project="$PROJECT_ID"
+log_success "Service account created"
 
 # =============================================================================
 # Grant Project-Level IAM Roles
@@ -306,29 +293,17 @@ log_info "=========================================="
 
 KEY_FILE="${DEPLOYER_SA_ID}-key.json"
 
-# Check if key file already exists
+# Overwrite key file if it already exists
 if [ -f "$KEY_FILE" ]; then
-    log_warning "Key file $KEY_FILE already exists"
-    read -p "Do you want to overwrite it? The old key will be invalidated. (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        log_info "Backing up old key to ${KEY_FILE}.backup..."
-        cp "$KEY_FILE" "${KEY_FILE}.backup"
-        log_info "Creating new key file..."
-        gcloud iam service-accounts keys create "$KEY_FILE" \
-            --iam-account="$DEPLOYER_SA_EMAIL" \
-            --project="$PROJECT_ID"
-        log_success "New key created (old key backed up)"
-    else
-        log_info "Keeping existing key file"
-    fi
-else
-    log_info "Creating key file: $KEY_FILE"
-    gcloud iam service-accounts keys create "$KEY_FILE" \
-        --iam-account="$DEPLOYER_SA_EMAIL" \
-        --project="$PROJECT_ID"
-    log_success "Key file created: $KEY_FILE"
+    log_warning "Key file $KEY_FILE already exists, overwriting..."
+    rm -f "$KEY_FILE"
 fi
+
+log_info "Creating key file: $KEY_FILE"
+gcloud iam service-accounts keys create "$KEY_FILE" \
+    --iam-account="$DEPLOYER_SA_EMAIL" \
+    --project="$PROJECT_ID"
+log_success "Key file created: $KEY_FILE"
 
 # Set secure permissions on the key file
 log_info "Setting secure permissions on key file..."

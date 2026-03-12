@@ -20,7 +20,7 @@ This guide provides a complete deployment strategy for the GitHub Archive data p
 │ PHASE 1: Ingestion                                             │
 │ • Cloud Scheduler Job → Cloud Run Job (Downloader)             │
 │ • Downloads: 2026-03-10-18.json.gz to GCS                      │
-│ • Landing Bucket: dev-{env}-github-archive-landing              │
+│ • Landing Bucket: {project_id}-{env}-github-archive-landing     │
 │ • Retention: 6 days                                            │
 └─────────────────────────────────────────────────────────────────┘
          │ 2. Object Finalized Event
@@ -29,7 +29,7 @@ This guide provides a complete deployment strategy for the GitHub Archive data p
 │ PHASE 2: Processing                                            │
 │ • Eventarc Trigger → Cloud Run Service (Processor)             │
 │ • Validates, transforms, chunks large files                    │
-│ • Staging Bucket: dev-{env}-github-archive-staging              │
+│ • Staging Bucket: {project_id}-{env}-github-archive-staging     │
 │ • Retention: 30 days                                           │
 └─────────────────────────────────────────────────────────────────┘
          │ 3. Object Finalized Event
@@ -47,7 +47,7 @@ This guide provides a complete deployment strategy for the GitHub Archive data p
 
 ## 📊 Resource Inventory
 
-### Phase 1: Ingestion (8 resources)
+### Phase 1: Ingestion (~18 resources)
 
 | Resource | Type | Purpose | Layer |
 |----------|------|---------|-------|
@@ -56,21 +56,29 @@ This guide provides a complete deployment strategy for the GitHub Archive data p
 | `github_archive_download` | Cloud Scheduler Job | Hourly trigger at :30 past | Static |
 | `github_archive_downloader` | Service Account | Downloader identity | Static |
 | `scheduler` | Service Account | Scheduler identity | Static |
-| 4x IAM bindings | IAM Permissions | Storage, Logging, Invoker | Static |
+| `cloud-build` | Service Account | Cloud Build identity (shared) | Static |
+| `github-archive` | Artifact Registry | Docker images (shared) | Static |
+| 4x Downloader/Scheduler IAM | IAM Permissions | Storage, Logging, Invoker | Static |
+| 7x Cloud Build SA IAM | IAM Permissions | Build, Deploy, Push | Static |
+| `build_downloader_image` | null_resource | Builds downloader container | Static |
 
-### Phase 2: Processing (18 resources)
+### Phase 2: Processing (~31 resources)
 
 | Resource | Type | Purpose | Layer |
 |----------|------|---------|-------|
 | `staging` | Storage Bucket | Processed files | Static |
 | `processor` | Service Account | Processor identity | Static |
+| `splitter` | Service Account | File splitter identity | Static |
 | `eventarc_invoker` | Service Account | Eventarc trigger identity | Static |
+| 10x IAM bindings | IAM Permissions | Logging, monitoring, bucket access | Static |
 | 9x GCP APIs | Project Services | Enable required APIs | First-Time |
-| `docker_repo` | Artifact Registry | Container images | First-Time |
 | `phase2_processor` | Cloud Build Trigger | Manual deployment | First-Time |
+| 2x Service Agent IAM | IAM Permissions | Pub/Sub publisher, Eventarc receiver | First-Time |
+| 1x Cloud Build actAs | IAM Permissions | CB SA can act as processor | First-Time |
 | `processor` | Cloud Run Service | Main processing service | Operational |
-| `storage_events` | Eventarc Trigger | GCS → Cloud Run | Operational |
-| 6x IAM bindings | IAM Permissions | Multi-service access | All Layers |
+| `storage_events` | Eventarc Trigger | GCS → Cloud Run (single trigger) | Operational |
+| `eventarc_invoker_processor` | IAM Binding | Invoker can invoke service | Operational |
+| `eventarc_ack_deadline` | terraform_data | Update Pub/Sub ack deadline | Operational |
 
 ### Phase 3: Loading (15 resources)
 
@@ -118,8 +126,8 @@ graph TB
     P2_PROCESSOR --> P2_STAGING
 
     P2_STAGING -.->|object finalized| P3_FUNCTION
+    P3_DATASET --> P3_TABLE
     P3_FUNCTION --> P3_TABLE
-    P3_TABLE --> P3_DATASET
 
     style P1_LANDING fill:#e1f5ff
     style P2_STAGING fill:#fff4e1
@@ -137,8 +145,8 @@ graph TB
 
     subgraph "Phase 2 First-Time Layer"
         APIS[GCP APIs]
-        REPO[Artifact Registry]
-        BUILD[Cloud Build Config]
+        BUILD[Cloud Build Trigger]
+        AGENTS[Service Agent IAM]
     end
 
     subgraph "Phase 2 Operational Layer"
@@ -150,8 +158,8 @@ graph TB
     SA --> IAM_STATIC
     BUCKETS --> IAM_STATIC
 
-    APIS --> REPO
-    REPO --> BUILD
+    APIS --> AGENTS
+    APIS --> BUILD
     BUILD --> SERVICE
 
     IAM_STATIC -.->|remote state| SERVICE
@@ -186,7 +194,7 @@ graph LR
     P2_OPS -->|reads outputs| P2_STATIC
     P2_OPS -->|reads outputs| P2_FIRST
 
-    P3_FIRST -->|reads bucket| P2_STATIC
+    P3_FIRST -->|reads outputs| P3_STATIC
     P3_OPS -->|reads outputs| P3_STATIC
     P3_OPS -->|reads outputs| P3_FIRST
 
@@ -583,14 +591,14 @@ gcloud eventarc triggers describe STORAGE_EVENTS \
 
 | Phase | Layer | Resources | Dependencies | Time to Deploy |
 |-------|-------|-----------|--------------|----------------|
-| **Phase 1** | Single | 8 | None | ~2 min |
-| **Phase 2** | Static | 7 | Phase 1 bucket name | ~1 min |
-| **Phase 2** | First-Time | 9 | Static layer outputs | ~3 min |
-| **Phase 2** | Operational | 3 | Static + First-Time outputs | ~2 min |
-| **Phase 3** | Static | 7 | Phase 2 bucket name | ~1 min |
+| **Phase 1** | Single | ~18 | None | ~2 min |
+| **Phase 2** | Static | 14 | Phase 1 bucket name | ~1 min |
+| **Phase 2** | First-Time | 13 | Static layer outputs | ~3 min |
+| **Phase 2** | Operational | 4 | Static + First-Time outputs | ~2 min |
+| **Phase 3** | Static | 12 | Phase 2 bucket name | ~1 min |
 | **Phase 3** | First-Time | 4 | Static layer outputs | ~2 min |
-| **Phase 3** | Operational | 4 | Static + First-Time outputs | ~3 min |
-| **Cloud Build** | - | 2 images | Phase 2 resources exist | ~5 min |
+| **Phase 3** | Operational | 7 | Static + First-Time outputs | ~3 min |
+| **Cloud Build** | - | 2 images | Phase 1 AR + CB SA exist | ~5 min |
 
 **Total Estimated Time:** ~20-25 minutes for full deployment
 

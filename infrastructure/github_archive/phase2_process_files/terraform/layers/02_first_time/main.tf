@@ -127,20 +127,9 @@ resource "google_project_iam_member" "eventarc_event_receiver" {
 }
 
 # =============================================================================
-# Artifact Registry Repository
+# Artifact Registry is defined in Phase 1 (phase1_ingestion/terraform/artifact_registry.tf)
+# Repository name: ${var.environment}-github-archive
 # =============================================================================
-resource "google_artifact_registry_repository" "docker_repo" {
-  location      = var.region
-  repository_id = "data-pipeline"
-  description   = "Docker repository for GitHub Archive processing images"
-  format        = "DOCKER"
-
-  docker_config {
-    immutable_tags = false
-  }
-
-  labels = local.common_labels
-}
 
 # =============================================================================
 # Cloud Build Trigger for Phase 2 Processor
@@ -163,9 +152,9 @@ resource "google_cloudbuild_trigger" "phase2_processor" {
       args = [
         "build",
         "-t",
-        "${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/processor:$SHORT_SHA",
+        "${var.region}-docker.pkg.dev/${var.project_id}/${var.environment}-github-archive/processor:$SHORT_SHA",
         "-t",
-        "${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/processor:latest",
+        "${var.region}-docker.pkg.dev/${var.project_id}/${var.environment}-github-archive/processor:latest",
         "-f",
         "Dockerfile.processor",
         "."
@@ -178,7 +167,7 @@ resource "google_cloudbuild_trigger" "phase2_processor" {
       args = [
         "push",
         "--all-tags",
-        "${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/processor"
+        "${var.region}-docker.pkg.dev/${var.project_id}/${var.environment}-github-archive/processor"
       ]
     }
 
@@ -190,7 +179,7 @@ resource "google_cloudbuild_trigger" "phase2_processor" {
         "-c",
         <<-EOT
           gcloud run deploy ${var.environment}-data-pipeline-processor \
-            --image ${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/processor:$SHORT_SHA \
+            --image ${var.region}-docker.pkg.dev/${var.project_id}/${var.environment}-github-archive/processor:$SHORT_SHA \
             --platform managed \
             --region ${var.region} \
             --memory 4Gi \
@@ -207,8 +196,8 @@ resource "google_cloudbuild_trigger" "phase2_processor" {
 
     # Images to push to Artifact Registry
     images = [
-      "${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/processor:$SHORT_SHA",
-      "${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/processor:latest"
+      "${var.region}-docker.pkg.dev/${var.project_id}/${var.environment}-github-archive/processor:$SHORT_SHA",
+      "${var.region}-docker.pkg.dev/${var.project_id}/${var.environment}-github-archive/processor:latest"
     ]
 
     # Build options
@@ -217,8 +206,8 @@ resource "google_cloudbuild_trigger" "phase2_processor" {
     }
   }
 
-  # Use the dedicated Cloud Build service account
-  service_account = google_service_account.cloudbuild_sa.id
+  # Use the dedicated Cloud Build service account (defined in Phase 1)
+  service_account = "projects/${var.project_id}/serviceAccounts/${local.cloudbuild_sa_email}"
 
   # Substitutions for the build
   substitutions = {
@@ -234,57 +223,16 @@ resource "google_cloudbuild_trigger" "phase2_processor" {
 
   depends_on = [
     google_project_service.cloudbuild,
-    google_artifact_registry_repository.docker_repo,
   ]
 }
 
 # =============================================================================
-# Cloud Build Service Account
+# Cloud Build Service Account Reference
 # =============================================================================
-# Dedicated service account for Cloud Build operations
-resource "google_service_account" "cloudbuild_sa" {
-  account_id   = "${var.environment}-cloud-build"
-  display_name = "${var.environment} Cloud Build"
-  description  = "Service account for Cloud Build to deploy Phase 2 and Phase 3 services"
-  project      = var.project_id
-}
-
-# Grant Cloud Build roles to the service account
-resource "google_project_iam_member" "cloudbuild_builder" {
-  project = var.project_id
-  role    = "roles/cloudbuild.builds.builder"
-  member  = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
-}
-
-resource "google_project_iam_member" "cloudbuild_artifactregistry_writer" {
-  project = var.project_id
-  role    = "roles/artifactregistry.writer"
-  member  = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
-}
-
-resource "google_project_iam_member" "cloudbuild_logging" {
-  project = var.project_id
-  role    = "roles/logging.logWriter"
-  member  = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
-}
-
-resource "google_project_iam_member" "cloudbuild_run_developer" {
-  project = var.project_id
-  role    = "roles/run.developer"
-  member  = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
-}
-
-resource "google_project_iam_member" "cloudbuild_storage_admin" {
-  project = var.project_id
-  role    = "roles/storage.objectAdmin"
-  member  = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
-}
-
-# Cloud Functions developer (for Phase 3)
-resource "google_project_iam_member" "cloudbuild_functions_developer" {
-  project = var.project_id
-  role    = "roles/cloudfunctions.developer"
-  member  = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
+# The Cloud Build SA is defined in Phase 1 (phase1_ingestion/terraform/cloudbuild_sa.tf).
+# Reference it by email here for the trigger and act-as binding.
+locals {
+  cloudbuild_sa_email = "${var.environment}-cloud-build@${var.project_id}.iam.gserviceaccount.com"
 }
 
 # =============================================================================
@@ -296,5 +244,5 @@ resource "google_project_iam_member" "cloudbuild_functions_developer" {
 resource "google_service_account_iam_member" "cloudbuild_actas_processor" {
   service_account_id = "projects/${var.project_id}/serviceAccounts/${var.environment}-data-pipeline-processor@${var.project_id}.iam.gserviceaccount.com"
   role               = "roles/iam.serviceAccountUser"
-  member             = "serviceAccount:${google_service_account.cloudbuild_sa.email}"
+  member             = "serviceAccount:${local.cloudbuild_sa_email}"
 }

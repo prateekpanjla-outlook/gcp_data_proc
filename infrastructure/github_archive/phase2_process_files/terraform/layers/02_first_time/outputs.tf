@@ -16,13 +16,13 @@ output "environment" {
 }
 
 output "artifact_registry_repository" {
-  description = "Full name of the Artifact Registry repository"
-  value       = google_artifact_registry_repository.docker_repo.id
+  description = "Artifact Registry repository name (defined in Phase 1)"
+  value       = "${var.environment}-github-archive"
 }
 
 output "docker_repository_name" {
-  description = "Name of the Docker repository"
-  value       = google_artifact_registry_repository.docker_repo.repository_id
+  description = "Name of the Docker repository (defined in Phase 1)"
+  value       = "${var.environment}-github-archive"
 }
 
 output "apis_enabled" {
@@ -51,6 +51,6 @@ output "cloud_build_trigger_name" {
 }
 
 output "cloud_build_sa_email" {
-  description = "Email of the Cloud Build service account"
-  value       = google_service_account.cloudbuild_sa.email
+  description = "Email of the Cloud Build service account (defined in Phase 1)"
+  value       = local.cloudbuild_sa_email
 }

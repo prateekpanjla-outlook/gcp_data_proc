@@ -82,8 +82,8 @@ graph TB
 
     subgraph "Phase 2 First-Time Layer"
         APIS[Enable GCP APIs]
-        REPO[Artifact Registry]
         BUILD[Cloud Build Trigger]
+        AGENTS[Service Agent IAM]
     end
 
     subgraph "Phase 2 Operational Layer"
@@ -97,8 +97,8 @@ graph TB
     SA2 --> IAM1
     SA3 --> IAM1
 
-    APIS --> REPO
-    REPO --> BUILD
+    APIS --> AGENTS
+    APIS --> BUILD
 
     BUCKET1 -.->|remote state| SERVICE
     SA1 -.->|remote state| SERVICE
@@ -166,19 +166,19 @@ graph TB
 ```mermaid
 graph LR
     subgraph "Phase 1"
-        P1["Single Layer<br>8 Resources"]
+        P1["Single Layer<br>~18 Resources"]
     end
 
     subgraph "Phase 2"
-        P2S["Static<br>7 Resources"]
-        P2F["First-Time<br>9 Resources"]
-        P2O["Operational<br>3 Resources"]
+        P2S["Static<br>14 Resources"]
+        P2F["First-Time<br>13 Resources"]
+        P2O["Operational<br>4 Resources"]
     end
 
     subgraph "Phase 3"
-        P3S["Static<br>7 Resources"]
+        P3S["Static<br>12 Resources"]
         P3F["First-Time<br>4 Resources"]
-        P3O["Operational<br>4 Resources"]
+        P3O["Operational<br>7 Resources"]
     end
 
     P1 -->|bucket name| P2S
@@ -395,16 +395,16 @@ graph TB
 
 ```mermaid
 pie title Total Resources by Phase and Layer
-    "Phase 1" : 8
-    "Phase 2 Static" : 7
-    "Phase 2 First-Time" : 9
-    "Phase 2 Operational" : 3
-    "Phase 3 Static" : 7
+    "Phase 1" : 18
+    "Phase 2 Static" : 14
+    "Phase 2 First-Time" : 13
+    "Phase 2 Operational" : 4
+    "Phase 3 Static" : 12
     "Phase 3 First-Time" : 4
-    "Phase 3 Operational" : 4
+    "Phase 3 Operational" : 7
 ```
 
-**Total: 42 Terraform Resources**
+**Total: ~72 Terraform Resources** (includes AR, Cloud Build SA, and all IAM bindings consolidated in Phase 1)
 
 ---
 

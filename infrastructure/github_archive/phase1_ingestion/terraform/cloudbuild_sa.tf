@@ -1,24 +1,38 @@
 #
 # Manages the dedicated service account for Cloud Build.
-# This SA is used by the Cloud Build trigger to build and deploy services.
-# It replaces the default Compute Engine service account for better security.
+# This SA is used by Cloud Build to build and deploy services across all phases.
+# Defined once in Phase 1 and referenced by other phases.
 #
 
 resource "google_service_account" "cloudbuild_sa" {
   project      = var.project_id
   account_id   = "${var.environment}-cloud-build"
   display_name = "Service Account for Cloud Build (${var.environment})"
-  description  = "Used by Cloud Build triggers to build and deploy applications."
+  description  = "Used by Cloud Build to submit builds, push to Artifact Registry, and deploy Cloud Run services/jobs."
 }
 
 locals {
   cloud_build_sa_roles = toset([
-    # Comprehensive role for all build, push, and logging activities.
+    # Submit builds by uploading tarball to Cloud Build
     "roles/cloudbuild.builds.builder",
 
-    # For deploying to Cloud Run
-    "roles/run.admin",              # Deploy and manage Cloud Run services
-    "roles/iam.serviceAccountUser", # Attach runtime SAs to new Cloud Run revisions
+    # Push/pull images from Artifact Registry
+    "roles/artifactregistry.writer",
+
+    # Upload build source to GCS (tarball staging)
+    "roles/storage.objectAdmin",
+
+    # Deploy Cloud Run services and jobs
+    "roles/run.admin",
+
+    # Deploy Cloud Functions (Phase 3)
+    "roles/cloudfunctions.developer",
+
+    # Attach runtime SAs to Cloud Run revisions
+    "roles/iam.serviceAccountUser",
+
+    # Write build logs
+    "roles/logging.logWriter",
   ])
 }
 

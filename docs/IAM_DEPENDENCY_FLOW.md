@@ -15,8 +15,8 @@ graph LR
 
     subgraph "2. Build-Time (Cloud Build)"
         direction LR
-        CLOUDBUILD_SA["Cloud Build SA<br>(PROJECT_NUM@cloudbuild.gserviceaccount.com)"]
-        CLOUDBUILD_ROLES["<strong>Build-Time Roles (Least Privilege)</strong><br>---<br><u>For Building & Pushing Artifacts:</u><br>roles/cloudbuild.builds.editor<br>roles/storage.objectAdmin<br>roles/artifactregistry.writer<br>roles/logging.logWriter<br><br><u>For Deploying to Cloud Run:</u><br>roles/run.admin<br>roles/iam.serviceAccountUser"]
+        CLOUDBUILD_SA["Custom Cloud Build SA<br>{env}-cloud-build@project.iam.gserviceaccount.com<br>Defined in Phase 1 cloudbuild_sa.tf"]
+        CLOUDBUILD_ROLES["<strong>Build-Time Roles (Least Privilege)</strong><br>---<br><u>For Building & Pushing Artifacts:</u><br>roles/cloudbuild.builds.builder<br>roles/storage.objectAdmin<br>roles/artifactregistry.writer<br>roles/logging.logWriter<br><br><u>For Deploying to Cloud Run and Functions:</u><br>roles/run.admin<br>roles/cloudfunctions.developer<br>roles/iam.serviceAccountUser"]
         CLOUDBUILD_SA -- Needs --> CLOUDBUILD_ROLES
     end
 
@@ -26,7 +26,7 @@ graph LR
             direction TB
             P1_SCHED["Cloud Scheduler"] -- "Invokes As<br>scheduler SA" --> P1_JOB["Cloud Run Job<br>(Downloader)"]
             P1_JOB -- "Runs As<br>downloader SA" --> P1_BUCKET["GCS Landing Bucket"]
-            P1_JOB_SA["<strong>Downloader SA Needs:</strong><br>storage.objectCreator"]
+            P1_JOB_SA["<strong>Downloader SA Needs:</strong><br>storage.objectUser<br>logging.logWriter"]
             P1_JOB -- "Uses SA with role" --> P1_JOB_SA
         end
 
@@ -38,7 +38,7 @@ graph LR
             P2_EVENTARC_INVOKER -- "Invokes" --> P2_SERVICE["Cloud Run Service<br>(Processor)"]
             P2_SERVICE -- "Runs As<br>processor SA" --> P2_STAGING_BUCKET["GCS Staging Bucket"]
 
-            P2_PERMS["<strong>Permissions Needed:</strong><br>1. Storage Agent needs `pubsub.publisher`<br><strong>2. Pub/Sub Agent needs `iam.serviceAccountTokenCreator`<br>   on Eventarc Invoker SA (to impersonate)</strong><br>3. Invoker SA needs `run.invoker` on Service<br>4. Processor SA needs `storage.objectAdmin` on Staging Bucket"]
+            P2_PERMS["<strong>Permissions Needed:</strong><br>1. Storage Agent needs `pubsub.publisher`<br><strong>2. Pub/Sub Agent needs `iam.serviceAccountTokenCreator`<br>   on Eventarc Invoker SA (to impersonate)</strong><br>3. Invoker SA needs `run.invoker` on Service<br>4. Processor SA needs `storage.objectCreator` + `objectViewer` on Staging Bucket"]
             P2_PUBSUB_AGENT -.-> P2_PERMS
         end
 
@@ -64,6 +64,7 @@ graph LR
     TERRAFORM_SA -- "Provisions & Grants Roles" --> P3_EVENTARC_INVOKER
 
     CLOUDBUILD_SA -- "Builds & Deploys<br>New Revision To" --> P2_SERVICE
+    CLOUDBUILD_SA -- "Builds & Deploys<br>Cloud Function" --> P3_FUNCTION
 
     subgraph "Security Explanation"
       direction TB

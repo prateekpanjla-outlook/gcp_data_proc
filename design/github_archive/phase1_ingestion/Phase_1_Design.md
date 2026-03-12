@@ -7,39 +7,49 @@ Phase 1 implements the data ingestion layer that downloads hourly GitHub Archive
 ## Architecture
 
 ```mermaid
-flowchart TB
+graph TB
     subgraph External["External Services"]
-        GHA[GitHub Archive<br/>data.gharchive.org]
+        GHA[GitHub Archive<br>data.gharchive.org]
     end
 
     subgraph GCP["Google Cloud Project"]
         subgraph Trigger["Scheduling"]
-            CS[Cloud Scheduler<br/>Hourly Trigger]
+            CS[Cloud Scheduler<br>Hourly Trigger]
         end
 
         subgraph Compute["Compute"]
-            CRJ[Cloud Run Job<br/>github-archive-downloader]
+            CRJ[Cloud Run Job<br>github-archive-downloader]
         end
 
         subgraph Storage["Storage"]
-            LB[GCS Landing Bucket<br/>github-archive-landing]
+            LB[GCS Landing Bucket<br>github-archive-landing]
+        end
+
+        subgraph Build["Build Infrastructure"]
+            AR[Artifact Registry<br>github-archive]
+            CBSA[Cloud Build SA<br>cloud-build]
         end
 
         subgraph IAM["Identity"]
-            SA[Service Account<br/>github-archive-downloader]
+            SA[Service Account<br>github-archive-downloader]
+            SCHED_SA[Service Account<br>scheduler]
         end
     end
 
     CS -->|"Trigger (hourly)"| CRJ
     CRJ -->|"Download .json.gz"| GHA
     CRJ -->|"gsutil cp"| LB
-    CRJ -.->|"Uses SA"| SA
-    SA -->|"storage.objectCreator"| LB
+    CRJ -.->|"Runs as"| SA
+    SA -->|"storage.objectUser"| LB
+    CBSA -->|"builds image to"| AR
+    CS -.->|"Uses SA"| SCHED_SA
 
     style GHA fill:#f9f,stroke:#333
     style CS fill:#e1f5fe,stroke:#333
     style CRJ fill:#e8f5e9,stroke:#333
     style LB fill:#fff3e0,stroke:#333
+    style AR fill:#e1bee7,stroke:#333
+    style CBSA fill:#fff3e0,stroke:#333
 ```
 
 ## Components
@@ -48,11 +58,13 @@ flowchart TB
 
 | Property | Value | Notes |
 |----------|-------|-------|
-| **Name** | `{env}-github-archive-downloader` | Environment-prefixed |
+| **Name** | `{env}-github-archive-download-gsutil` | Environment-prefixed |
 | **Base Image** | `gcr.io/google.com/cloudsdktool/google-cloud-cli:slim` | Includes gsutil |
 | **Runtime** | Bash script | No application code |
-| **Timeout** | Default (10 min) | Configurable up to 168 hours |
+| **Timeout** | 1800s (30 min) | Configurable up to 168 hours |
 | **Region** | `us-central1` | Same as all other resources |
+| **CPU** | 1 | |
+| **Memory** | 512Mi | |
 
 **Environment Variables:**
 | Variable | Default | Description |
@@ -75,7 +87,7 @@ flowchart TB
 
 | Property | Value | Notes |
 |----------|-------|-------|
-| **Schedule** | `0 * * * *` | Hourly at minute 0 |
+| **Schedule** | `30 * * * *` | Hourly at 30 minutes past |
 | **Target** | Cloud Run Job | HTTP trigger |
 | **Time Zone** | UTC | GitHub Archive uses UTC |
 
@@ -89,7 +101,7 @@ sequenceDiagram
     participant GCS as Landing Bucket
 
     CS->>CRJ: Trigger execution (hourly)
-    CRJ->>CRJ: Calculate target filename<br/>(YYYY-MM-DD-H.json.gz)
+    CRJ->>CRJ: Calculate target filename<br>(YYYY-MM-DD-H.json.gz)
     CRJ->>GCS: Check if file exists (idempotency)
 
     alt File exists
@@ -145,10 +157,8 @@ All logs are JSON-formatted for Cloud Logging integration:
 
 | Role | Scope | Purpose |
 |------|-------|---------|
-| `roles/storage.objectCreator` | Landing Bucket | Upload files to GCS |
-| `roles/storage.objectViewer` | Landing Bucket | Check file existence |
+| `roles/storage.objectUser` | Project | Read/write objects in GCS buckets |
 | `roles/logging.logWriter` | Project | Write logs to Cloud Logging |
-| `roles/monitoring.metricWriter` | Project | Write custom metrics |
 
 ### Cloud Run Job Execution
 
@@ -161,7 +171,7 @@ All logs are JSON-formatted for Cloud Logging integration:
 
 | Default | Modification | Reason |
 |---------|--------------|--------|
-| **Cloud Run timeout** | Uses default 10 min | Sufficient for single file download |
+| **Cloud Run timeout** | 1800s (30 min) | Sufficient for single file download |
 | **gsutil streaming** | Direct pipe to GCS | Memory-efficient for large files |
 | **File naming** | Non-padded hours | Matches GitHub Archive convention |
 

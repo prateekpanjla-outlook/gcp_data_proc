@@ -17,7 +17,7 @@ output "storage_trigger_name" {
 
 output "image_deployed" {
   description = "Docker image tag deployed"
-  value       = "${var.region}-docker.pkg.dev/${var.project_id}/github-archive/processor:${var.image_tag}"
+  value       = "${var.region}-docker.pkg.dev/${var.project_id}/${var.environment}-github-archive/processor:${var.image_tag}"
 }
 
 output "deployment_timestamp" {

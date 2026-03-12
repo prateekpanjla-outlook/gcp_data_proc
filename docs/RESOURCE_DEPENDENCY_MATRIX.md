@@ -6,7 +6,7 @@ Complete breakdown of all resources, their requirements, and deployment dependen
 
 ## 📊 Complete Resource Inventory
 
-### Phase 1: Ingestion (8 Resources)
+### Phase 1: Ingestion (~18 Resources)
 
 | Resource Name | Type | Requires | Created By | Layer |
 |---------------|------|----------|------------|-------|
@@ -15,9 +15,14 @@ Complete breakdown of all resources, their requirements, and deployment dependen
 | `github_archive_download` | Cloud Scheduler Job | Cloud Run Job URL, Service Account | Terraform | Static |
 | `github_archive_downloader` (SA) | Service Account | Project ID | Terraform | Static |
 | `scheduler` (SA) | Service Account | Project ID | Terraform | Static |
+| `cloudbuild_sa` (SA) | Service Account | Project ID | Terraform | Static |
+| `data_pipeline_repo` | Artifact Registry | Project ID | Terraform | Static |
 | `github_archive_downloader_storage` | IAM Binding | Service Account, Project | Terraform | Static |
 | `github_archive_downloader_logging` | IAM Binding | Service Account, Project | Terraform | Static |
 | `scheduler_github_invoker` | IAM Binding | Scheduler SA, Cloud Run Job | Terraform | Static |
+| `scheduler_token_creator` | IAM Binding | Scheduler SA, Service Agent | Terraform | Static |
+| 7x `cloudbuild_sa_roles` | IAM Bindings | Cloud Build SA, Project | Terraform | Static |
+| `build_downloader_image` | null_resource | AR, Cloud Build SA | Terraform | Static |
 
 ### Phase 2: Processing (18 Resources)
 
@@ -32,16 +37,16 @@ Complete breakdown of all resources, their requirements, and deployment dependen
 | 3x Monitoring IAM | IAM Bindings | Service Accounts | monitoring.googleapis.com |
 | 2x Storage IAM | IAM Bindings | Service Accounts, Buckets | None |
 
-#### First-Time Layer (9 Resources)
+#### First-Time Layer (13 Resources)
 | Resource Name | Type | Requires | External Dependency |
 |---------------|------|----------|---------------------|
 | 9x GCP APIs | Project Services | Project ID | - |
-| `docker_repo` | Artifact Registry | Project ID | artifactregistry.googleapis.com |
-| `phase2_processor` | Cloud Build Trigger | Project ID, Repository | cloudbuild.googleapis.com |
-| `cloudbuild_sa` | Service Account | Project ID | - |
-| 5x Cloud Build IAM | IAM Bindings | Service Account, Project | Various APIs |
+| `phase2_processor` | Cloud Build Trigger | Project ID, Cloud Build API | cloudbuild.googleapis.com |
 | `storage_pubsub_publisher` | IAM Binding | Service Agent | pubsub.googleapis.com |
 | `eventarc_event_receiver` | IAM Binding | Service Agent | eventarc.googleapis.com |
+| `cloudbuild_actas_processor` | IAM Binding | Cloud Build SA (Phase 1), Processor SA | - |
+
+> **Note:** Artifact Registry and Cloud Build SA are defined in Phase 1 (`cloudbuild_sa.tf`, `artifact_registry.tf`).
 
 #### Operational Layer (3 Resources)
 | Resource Name | Type | Requires | Dependency Source |
@@ -99,7 +104,7 @@ graph LR
 ```mermaid
 graph TB
     subgraph "Phase 2"
-        P2_STATIC[02_static outputs]
+        P2_STATIC[01_static outputs]
         P2_FIRST[02_first_time outputs]
         P2_OPS[03_operational]
 
@@ -112,7 +117,7 @@ graph TB
         P3_FIRST[02_first_time outputs]
         P3_OPS[03_operational]
 
-        P3_FIRST -->|reads| P2_STATIC
+        P3_FIRST -->|reads| P3_STATIC
         P3_OPS -->|reads| P3_STATIC
         P3_OPS -->|reads| P3_FIRST
     end
@@ -218,12 +223,14 @@ graph TB
 
 | Service Account | Created By | Used By | Purpose |
 |-----------------|------------|---------|---------|
-| `scheduler` | Phase 1 | Phase 1 | Invokes Cloud Run Job |
-| `github_archive_downloader` | Phase 1 | Phase 1 | Runs downloader job |
-| `processor` | Phase 2 | Phase 2 | Runs processor service |
-| `eventarc_invoker` | Phase 2 | Phase 2 | Invokes Cloud Run |
-| `bq_loader` | Phase 3 | Phase 3 | Loads data to BigQuery |
-| `eventarc_invoker` | Phase 3 | Phase 3 | Invokes Cloud Function |
+| `{env}-scheduler` | Phase 1 | Phase 1 | Invokes Cloud Run Job |
+| `{env}-github-archive-downloader` | Phase 1 | Phase 1 | Runs downloader job |
+| `{env}-cloud-build` | Phase 1 | Phase 1, 2, 3 | Cloud Build (shared) |
+| `{env}-github-archive-processor` | Phase 2 | Phase 2 | Runs processor service |
+| `{env}-file-splitter` | Phase 2 | Phase 2 | File splitter identity |
+| `{env}-eventarc-invoker` | Phase 2 | Phase 2 | Invokes Cloud Run |
+| `{env}-bq-loader` | Phase 3 | Phase 3 | Loads data to BigQuery |
+| `{env}-eventarc-invoker-bq` | Phase 3 | Phase 3 | Invokes Cloud Function |
 
 ---
 

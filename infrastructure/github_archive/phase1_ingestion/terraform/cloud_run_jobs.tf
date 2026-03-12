@@ -10,7 +10,7 @@ resource "google_cloud_run_v2_job" "github_archive_downloader" {
 
       containers {
         # This path points to the image built and pushed to Artifact Registry.
-        image = "${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/github-archive-downloader:latest"
+        image = "${var.region}-docker.pkg.dev/${var.project_id}/${var.environment}-github-archive/github-archive-downloader:latest"
         resources {
           limits = {
             cpu    = "1"

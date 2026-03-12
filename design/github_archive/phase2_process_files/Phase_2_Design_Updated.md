@@ -7,68 +7,63 @@ Phase 2 implements the data transformation layer that processes raw GitHub Archi
 ## Architecture (Updated)
 
 ```mermaid
-flowchart TB
+graph TB
     subgraph Storage["Storage Layer"]
-        LB[GCS Landing Bucket<br/>github-archive-landing]
-        SB[GCS Staging Bucket<br/>github-archive-staging]
+        LB[GCS Landing Bucket<br>github-archive-landing]
+        SB[GCS Staging Bucket<br>github-archive-staging]
     end
 
     subgraph Eventarc["Event Routing"]
-        ET1[Eventarc Trigger<br/>storage.object.v1.finalized]
-        ET2[Eventarc Trigger<br/>storage.object.v1.finalized]
+        ET[Eventarc Trigger<br>storage.object.v1.finalized<br>Single trigger on landing bucket]
     end
 
     subgraph Compute["Compute Layer"]
-        CRS[Cloud Run Service<br/>github-archive-processor]
-        CRJ[Cloud Run Job<br/>file-splitter]
+        CRS[Cloud Run Service<br>github-archive-processor<br>Handles splitting in-process]
     end
 
     subgraph IAM["Identity"]
-        SA1[Service Account<br/>github-archive-processor]
-        SA2[Service Account<br/>eventarc-invoker]
+        SA1[Service Account<br>github-archive-processor]
+        SA2[Service Account<br>eventarc-invoker]
+        SA3[Service Account<br>file-splitter]
     end
 
-    subgraph Metadata["⭐ NEW: Metadata Tracking"]
-        MD[Split Metadata Files<br/>.split-metadata.json]
-        CL[Cleanup Logic<br/>Track chunk processing]
+    subgraph Metadata["Metadata Tracking"]
+        MD[Split Metadata Files<br>.split-metadata.json]
+        CL[Cleanup Logic<br>Track chunk processing]
     end
 
-    LB -->|"file finalized"| ET1
-    ET1 -->|"POST /"| CRS
+    LB -->|"file finalized"| ET
+    ET -->|"POST /"| CRS
     CRS -->|"read raw files"| LB
     CRS -->|"write .ndjson.gz"| SB
 
-    CRS -->|"large file (>500MB)"| CRJ
-    CRJ -->|"download & split"| LB
-    CRJ -->|"write chunks"| LB
-    CRJ -.->|"⭐ write metadata"| MD
+    CRS -->|"large file: split in-process"| LB
+    CRS -.->|"write metadata"| MD
 
-    LB -->|"chunk finalized"| ET2
-    ET2 -->|"POST /"| CRS
-
-    CRS -.->|"⭐ mark chunk processed"| MD
+    CRS -.->|"mark chunk processed"| MD
     MD -.->|"all chunks done"| CL
     CL -->|"delete original"| LB
 
-    CRS -.->|"uses"| SA1
-    ET1 -.->|"invokes as"| SA2
-    ET2 -.->|"invokes as"| SA2
+    CRS -.->|"runs as"| SA1
+    ET -.->|"invokes as"| SA2
 
     style LB fill:#fff3e0,stroke:#333
     style SB fill:#e8f5e9,stroke:#333
     style CRS fill:#e3f2fd,stroke:#333
-    style CRJ fill:#fce4ec,stroke:#333
     style MD fill:#fff9c4,stroke:#333
     style CL fill:#f3e5f5,stroke:#333
 ```
 
+> **Note:** File splitting is handled within the processor service, not as a separate Cloud Run Job.
+> There is a single Eventarc trigger for the landing bucket. Path filtering is done in application code.
+
 ## Enhanced Data Flow
 
 ```mermaid
-flowchart LR
+graph LR
     subgraph Input["Input"]
-        R1[raw/2026-03-10-12.json.gz<br/>~2GB compressed]
-        R2[raw/2026-03-10-13.json.gz<br/>~50MB compressed]
+        R1[raw/2026-03-10-12.json.gz<br>~2GB compressed]
+        R2[raw/2026-03-10-13.json.gz<br>~50MB compressed]
     end
 
     subgraph Decision{"Size Check"}
@@ -76,10 +71,10 @@ flowchart LR
     end
 
     subgraph Split["⭐ File Splitter with Metadata"]
-        S1[Chunk 1<br/>~50MB]
-        S2[Chunk 2<br/>~50MB]
-        S3[Chunk N<br/>~50MB]
-        SM[📄 split-metadata.json<br/>tracks all chunks]
+        S1[Chunk 1<br>~50MB]
+        S2[Chunk 2<br>~50MB]
+        S3[Chunk N<br>~50MB]
+        SM[📄 split-metadata.json<br>tracks all chunks]
     end
 
     subgraph Process["Processor"]
@@ -135,7 +130,6 @@ sequenceDiagram
     participant GCS as Landing Bucket
     participant ET as Eventarc
     participant P as Processor Service
-    participant FS as File Splitter Job
     participant MD as Metadata File
     participant SB as Staging Bucket
 
@@ -146,20 +140,13 @@ sequenceDiagram
     P->>GCS: Get file metadata
 
     alt File > 500MB
-        P->>FS: Trigger split job (sync)
-        FS->>GCS: Download file
-
+        P->>GCS: Download and split in-process
         loop For each 10k lines
-            FS->>GCS: Upload chunk to chunks/
-            GCS->>ET: Chunk finalized event
+            P->>GCS: Upload chunk to chunks/
         end
-
-        FS->>MD: ⭐ Write split-metadata.json
-        Note over MD: Tracks: original_file,<br/>chunk_count, status
-
-        ET->>P: Process each chunk event
-        Note over MD: Triggered for each chunk
-
+        P->>MD: Write split-metadata.json
+        Note over MD: Tracks: original_file,<br>chunk_count, status
+        Note over GCS,ET: Chunk finalized events trigger processor again
     else File <= 500MB
         P->>GCS: Download file
     end
@@ -172,13 +159,11 @@ sequenceDiagram
         P->>SB: Write NDJSON chunk(s)
 
         alt Chunk file
-            P->>MD: ⭐ Mark chunk processed
-            Note over MD: Add to chunks_processed[]
-
+            P->>MD: Mark chunk processed
             alt All chunks processed
-                MD->>GCS: ⭐ Delete original file
-                MD->>GCS: ⭐ Delete processed chunks
-                Note over MD: Update status = 'cleanup_complete'
+                P->>GCS: Delete original file
+                P->>GCS: Delete processed chunks
+                P->>MD: Update status = cleanup_complete
             end
         end
     end
@@ -192,13 +177,13 @@ sequenceDiagram
 graph TB
     subgraph "Split Metadata File (.split-metadata.json)"
         ROOT[Metadata Object]
-        ORIG[original_file<br/>gs://.../raw/file.json.gz]
-        TIME[split_timestamp<br/>2026-03-10T12:00:00Z]
-        COUNT[chunk_count<br/>42]
-        FILES[output_files<br/>List of chunk paths]
-        PROCESSED[chunks_processed<br/>[] - updated as chunks complete]
-        STATUS[status<br/>pending_cleanup → cleanup_complete]
-        CLEANUP_AFTER[cleanup_after<br/>42 - delete after this many]
+        ORIG[original_file<br>gs://.../raw/file.json.gz]
+        TIME[split_timestamp<br>2026-03-10T12:00:00Z]
+        COUNT[chunk_count<br>42]
+        FILES[output_files<br>List of chunk paths]
+        PROCESSED[chunks_processed<br>[] - updated as chunks complete]
+        STATUS[status<br>pending_cleanup → cleanup_complete]
+        CLEANUP_AFTER[cleanup_after<br>42 - delete after this many]
 
         ROOT --> ORIG
         ROOT --> TIME
@@ -245,15 +230,11 @@ graph TB
 
 **Service Account:** `dev-github-archive-processor@dev-dataprocessing-489305.iam.gserviceaccount.com`
 
-### 2. Cloud Run Job (File Splitter)
+### 2. File Splitter (In-Process)
 
-| Property | Value | Notes |
-|----------|-------|-------|
-| **Name** | `{env}-file-splitter` | Environment-prefixed |
-| **Trigger** | On-demand from processor | Via Cloud Run API (synchronous) |
-| **Chunk Size** | 10,000 lines | Configurable |
-| **Target Chunk Size** | ~50MB | Approximate |
-| **⭐ Metadata** | Creates .split-metadata.json | Tracks chunk processing |
+The file splitting logic runs within the processor service code (not a separate Cloud Run Job).
+A `{env}-file-splitter` service account exists for future use if splitting is separated.
+Metadata tracking via `.split-metadata.json` enables safe cleanup after all chunks are processed.
 
 ### 3. Cloud Storage Buckets
 
@@ -271,12 +252,13 @@ graph TB
 | **Location** | `us-central1` |
 | **Path** | `processed/` |
 
-### 4. Eventarc Triggers
+### 4. Eventarc Trigger
 
 | Trigger | Event Type | Filter | Destination |
 |---------|------------|--------|-------------|
-| `dev-github-archive-storage` | `google.cloud.storage.object.v1.finalized` | Landing bucket | Processor service |
-| (Split chunks) | `google.cloud.storage.object.v1.finalized` | Landing bucket chunks/ | Processor service |
+| `{env}-github-archive-storage` | `google.cloud.storage.object.v1.finalized` | Landing bucket | Processor service |
+
+> Single trigger for the entire landing bucket. Path filtering (raw/ vs chunks/) is done in application code (`main.py`).
 
 ## Processing Pipeline
 
@@ -452,9 +434,9 @@ src/github_archive/phase2_process_files/
 |------|-------|---------|
 | `roles/storage.objectViewer` | Landing bucket | Read input files |
 | `roles/storage.objectCreator` | Staging bucket | Write output files |
+| `roles/storage.objectViewer` | Staging bucket | Read staging files (blob.reload) |
 | `roles/logging.logWriter` | Project | Structured logging |
-| `roles/errorreporting.writer` | Project | Error reporting |
-| `roles/run.invoker` | Project | Trigger splitter job |
+| `roles/monitoring.metricWriter` | Project | Write metrics |
 
 ### Service Account: `{env}-eventarc-invoker`
 

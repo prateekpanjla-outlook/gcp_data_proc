@@ -32,30 +32,30 @@ Storage["Cloud Storage Bucket: {project}-dev-github-archive-landing"]
 ## Line Break Syntax
 
 ### Issue
-Using HTML-style `<br/>` instead of Mermaid's `<br>`.
+While both `<br>` and `<br/>` work in modern Mermaid, `<br>` is the preferred form for consistency with Mermaid documentation. Use `<br>` throughout for maximum compatibility.
 
 ```mermaid
-# ❌ WRONG
-Node1[Text<br/>More text]
-
-# ✅ CORRECT
+# ✅ PREFERRED
 Node1[Text<br>More text]
+
+# ⚠️ ALSO WORKS but less consistent
+Node1[Text<br/>More text]
 ```
 
-## Subgraph Not Supported in flowchart
+## Subgraph Rendering in flowchart vs graph
 
 ### Issue
-Using `subgraph` inside `flowchart` diagrams causes errors. `subgraph` is only supported in `graph` or `stateDiagram`.
+While Mermaid officially supports `subgraph` in both `flowchart` and `graph` diagrams, some renderers (GitHub, VS Code preview) may have issues with `flowchart` + `subgraph` combinations. For maximum compatibility, prefer `graph` when using subgraphs.
 
 ```mermaid
-# ❌ WRONG - subgraph not supported in flowchart
-flowchart TD
+# ✅ WORKS - graph with subgraph (most compatible)
+graph TD
     subgraph Group
         A --> B
     end
 
-# ✅ CORRECT - use graph instead
-graph TD
+# ⚠️ ALSO VALID but may have renderer-specific issues
+flowchart TD
     subgraph Group
         A --> B
     end
