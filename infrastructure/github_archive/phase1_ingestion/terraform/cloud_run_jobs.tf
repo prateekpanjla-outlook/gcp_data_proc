@@ -1,39 +1,16 @@
-# Cloud Run Jobs for Phase 1: GitHub Archive Ingestion
-
-# ==============================================================================
-# GitHub Archive Ingestion Job (Phase 1: gsutil-based Downloader)
-# ==============================================================================
-# Downloads GitHub Archive files using gsutil for streaming
-# Memory-efficient: ~50MB regardless of file size
 resource "google_cloud_run_v2_job" "github_archive_downloader" {
-  name     = local.github_archive.job_name
-  location = var.region
   project  = var.project_id
+  name     = "${var.environment}-github-archive-download-gsutil"
+  location = var.region
 
   template {
     template {
+      service_account = google_service_account.github_archive_downloader.email
+      timeout         = "1800s" # 30 minutes
+
       containers {
-        # Custom image built from src/github_archive/phase1_ingestion/Dockerfile
-        # Includes: google-cloud-sdk + coreutils + download.sh script
-        # Build with: gcloud builds submit --config=config/cloudbuild-phase1.yaml .
+        # This path points to the image built and pushed to Artifact Registry.
         image = "${var.region}-docker.pkg.dev/${var.project_id}/data-pipeline/github-archive-downloader:latest"
-
-        # Environment variables
-        env {
-          name  = "BUCKET_NAME"
-          value = local.github_archive.bucket_name
-        }
-        env {
-          name  = "PROJECT_ID"
-          value = var.project_id
-        }
-        env {
-          name  = "HOURS_AGO"
-          value = "1"
-        }
-
-        # Resource limits (gsutil uses streaming)
-        # Cloud Run v2 requires min 512Mi when CPU is allocated
         resources {
           limits = {
             cpu    = "1"
@@ -41,18 +18,10 @@ resource "google_cloud_run_v2_job" "github_archive_downloader" {
           }
         }
       }
-
-      # Service account
-      service_account = google_service_account.github_archive_downloader.email
-
-      # Timeout (30 minutes - ample for gsutil download)
-      timeout = "1800s"
     }
   }
 
-  labels = {
-    environment = var.environment
-    phase       = "ingestion"
-    managed_by  = "terraform"
-  }
+  depends_on = [
+    null_resource.build_downloader_image
+  ]
 }

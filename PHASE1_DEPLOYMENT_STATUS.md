@@ -27,7 +27,7 @@
    - Downloads GitHub Archive files using gsutil
    - Memory: 512Mi, CPU: 1
    - Timeout: 30 minutes
-   - Image: `gcr.io/beaming-glyph-489707-b8/github-archive-downloader:latest`
+   - Image: `us-central1-docker.pkg.dev/beaming-glyph-489707-b8/data-pipeline/github-archive-downloader:latest`
 
 3. **Scheduler Job** - `test-github-archive-download-job`
    - Triggers Cloud Run Job hourly

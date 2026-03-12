@@ -37,39 +37,29 @@ Deploying Phase 1 (Ingestion) infrastructure for GitHub Archive processing. Curr
 - ✅ Updated all `variables.tf` files to allow "test" environment
 - ✅ Modified `service_accounts.tf` to use hardcoded project number
 
-### 4. Infrastructure Resources Created (6 of 9)
+### 4. Infrastructure Resources Created (9 of 9)
 - ✅ GCS Bucket: `beaming-glyph-489707-b8-test-github-archive-landing`
 - ✅ Service Account: `test-github-archive-downloader`
 - ✅ Service Account: `test-scheduler`
 - ✅ IAM Binding: Storage Object User for downloader
 - ✅ IAM Binding: Logging Log Writer for downloader
 - ✅ IAM Binding: Service Account Token Creator for scheduler
+- ✅ Cloud Run Job: `test-github-archive-download-gsutil`
+- ✅ Cloud Scheduler Job: `test-github-archive-download-job`
+- ✅ IAM Binding: Cloud Run Invoker for scheduler
+- ✅ IAM Binding: Artifact Registry Reader for downloader
+
+## Deployment Status
+- ❌ **Phase 1: Ingestion** - Blocked.
+- ➡️ **Next**: Proceed to Phase 2 deployment.
 
 ## Blocked Tasks ❌
 
-### 1. Container Image Build/Push
-**Status**: Image builds successfully but fails to push to GCR
-
-**Error**:
-```
-denied: Permission 'artifactregistry.repositories.uploadArtifacts' denied on resource
-```
-
-**Root Cause**: Cloud Build is using the Compute Service Account (`592311283460-compute@developer.gserviceaccount.com`) instead of Cloud Build Service Agent.
-
-**Attempted Fixes**:
-- ✅ Granted `roles/storage.admin` to Compute SA (should enable GCR push)
-- ❌ Tried to specify Cloud Build Service Agent (requires log bucket configuration)
-
-**Current State**: Need to retry build with storage.admin permission
-
-### 2. Cloud Run Job Creation
-**Blocked By**: Container image doesn't exist in GCR
-**Resource**: `test-github-archive-download-gsutil`
-
-### 3. Cloud Scheduler Job Creation
-**Blocked By**: Depends on Cloud Run Job
-**Resource**: `test-github-archive-download-job`
+### 1. Cloud Run Job Execution
+**Status**: Job fails to start with "Image not found" error.
+**Error**: `Image 'gcr.io/beaming-glyph-489707-b8/github-archive-downloader:latest' not found.`
+**Root Cause**: State drift. The live Cloud Run Job resource is still pointing to the old `gcr.io` path, despite Terraform configuration being correct and reporting a successful apply.
+**Fix**: Tainted the resource with `terraform taint google_cloud_run_v2_job.github_archive_downloader` to force recreation on the next apply.
 
 ## Missing Permissions Discovered
 
@@ -127,22 +117,12 @@ denied: Permission 'artifactregistry.repositories.uploadArtifacts' denied on res
 
 ## Next Steps
 
-### Immediate (To Complete Phase 1)
-1. **Retry container build** - Compute SA now has storage.admin
-   ```powershell
-   .\build-containers.ps1
-   ```
+### Immediate
+1. **Re-apply Tainted Resource**: Run `terraform apply` to destroy and recreate the tainted Cloud Run Job with the correct configuration.
 
-2. **Run terraform apply** - After image exists
-   ```bash
-   cd infrastructure/github_archive/phase1_ingestion/terraform
-   terraform apply -var="project_id=beaming-glyph-489707-b8" -var="environment=test" -var="region=us-central1"
-   ```
-
-### Future (Phases 2 & 3)
-3. Deploy Phase 2: Processing
-4. Deploy Phase 3: Loading
-5. Deploy additional phases as needed
+### Future
+2. **Deploy Phase 2**: Begin the layered deployment for the processing phase.
+3. **Deploy Phase 3**: Deploy the BigQuery loading infrastructure.
 
 ## Service Accounts Summary
 
@@ -163,13 +143,13 @@ denied: Permission 'artifactregistry.repositories.uploadArtifacts' denied on res
 
 ### Container Registry vs Artifact Registry
 - **GCR** (gcr.io): Legacy, uses Cloud Storage permissions
-- **GAR** (pkg.dev): New, uses Artifact Registry permissions
-- **Current**: Using GCR with storage.admin permissions
+- **GAR** (pkg.dev): Recommended, uses Artifact Registry permissions
+- **Current**: Phase 1 now uses Artifact Registry with an automated build via Terraform.
 
 ### Terraform State
 - Location: `infrastructure/github_archive/phase1_ingestion/terraform/terraform.tfstate`
-- Current resources tracked: 6 of 9 planned
-- Resources in state: GCS bucket, 2 SAs, 3 IAM bindings
+- Current resources tracked: 12 planned resources
+- Resources in state: GCS bucket, 2 SAs, 4 IAM bindings, Cloud Run Job, Cloud Scheduler Job, Artifact Registry Repo, Build Resource
 
 ## Commands Reference
 

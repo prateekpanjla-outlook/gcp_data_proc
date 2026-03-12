@@ -123,37 +123,10 @@ EOF
 
 check_prerequisites() {
     log "Checking prerequisites..."
-
-    # Check if gcloud is authenticated
-    if ! gcloud auth list --filter="account:ACTIVE" 2>/dev/null | grep -q .; then
-        error "Not authenticated with gcloud. Run: gcloud auth login"
-    fi
-
-    # Check if Docker is available
-    if ! command -v docker &> /dev/null; then
-        error "Docker is not installed"
-    fi
-
-    # Check if Terraform is available
-    if ! command -v terraform &> /dev/null; then
-        error "Terraform is not installed"
-    fi
-
+    command -v gcloud >/dev/null 2>&1 || error "gcloud is not installed or not in PATH"
+    command -v docker >/dev/null 2>&1 || error "Docker is not installed or not in PATH"
+    command -v terraform >/dev/null 2>&1 || error "Terraform is not installed or not in PATH"
     success "Prerequisites check passed"
-}
-
-configure_backend() {
-    local layer_dir=$1
-    local backend_file="${layer_dir}/backend.tf"
-
-    # Update backend bucket in the layer's backend.tf
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS
-        sed -i '' "s/REPLACE_WITH_TERRAFORM_STATE_BUCKET/${STATE_BUCKET}/g" "$backend_file"
-    else
-        # Linux
-        sed -i "s/REPLACE_WITH_TERRAFORM_STATE_BUCKET/${STATE_BUCKET}/g" "$backend_file"
-    fi
 }
 
 init_terraform() {
@@ -163,9 +136,6 @@ init_terraform() {
     log "Initializing Terraform for layer: ${layer_name}..."
 
     pushd "${layer_dir}" > /dev/null
-
-    # Configure backend before init
-    configure_backend "${layer_dir}"
 
     # Initialize
     if [ ! -d ".terraform" ]; then

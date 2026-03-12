@@ -25,25 +25,25 @@ Visual diagrams and quick reference for deploying the GitHub Archive data pipeli
 ```mermaid
 graph TB
     subgraph "External Sources"
-        GHA[GitHub Archive<br/>gharchive.org]
+        GHA["GitHub Archive<br>gharchive.org"]
     end
 
     subgraph "Phase 1: Ingestion"
-        SCHED[Cloud Scheduler<br/>Hourly :30]
-        JOB[Cloud Run Job<br/>Downloader]
-        LANDING[GCS Bucket<br/>Landing<br/>6-day retention]
+        SCHED["Cloud Scheduler<br>Hourly :30"]
+        JOB["Cloud Run Job<br>Downloader"]
+        LANDING["GCS Bucket<br>Landing<br>6-day retention"]
     end
 
     subgraph "Phase 2: Processing"
-        EVENTARC1[Eventarc Trigger<br/>Object Finalized]
-        SERVICE[Cloud Run Service<br/>Processor<br/>4GiB, 2 CPU]
-        STAGING[GCS Bucket<br/>Staging<br/>30-day retention]
+        EVENTARC1["Eventarc Trigger<br>Object Finalized"]
+        SERVICE["Cloud Run Service<br>Processor<br>4GiB, 2 CPU"]
+        STAGING["GCS Bucket<br>Staging<br>30-day retention"]
     end
 
     subgraph "Phase 3: Loading"
-        EVENTARC2[Eventarc Trigger<br/>Object Finalized]
-        FUNCTION[Cloud Function<br/>BigQuery Loader<br/>Python 3.11]
-        BQ[BigQuery<br/>Dataset & Table<br/>Partitioned]
+        EVENTARC2["Eventarc Trigger<br>Object Finalized"]
+        FUNCTION["Cloud Function<br>BigQuery Loader<br>Python 3.11"]
+        BQ["BigQuery<br>Dataset & Table<br>Partitioned"]
     end
 
     GHA -->|1. Download| SCHED
@@ -166,19 +166,19 @@ graph TB
 ```mermaid
 graph LR
     subgraph "Phase 1"
-        P1[Single Layer<br/>8 Resources]
+        P1["Single Layer<br>8 Resources"]
     end
 
     subgraph "Phase 2"
-        P2S[Static<br/>7 Resources]
-        P2F[First-Time<br/>9 Resources]
-        P2O[Operational<br/>3 Resources]
+        P2S["Static<br>7 Resources"]
+        P2F["First-Time<br>9 Resources"]
+        P2O["Operational<br>3 Resources"]
     end
 
     subgraph "Phase 3"
-        P3S[Static<br/>7 Resources]
-        P3F[First-Time<br/>4 Resources]
-        P3O[Operational<br/>4 Resources]
+        P3S["Static<br>7 Resources"]
+        P3F["First-Time<br>4 Resources"]
+        P3O["Operational<br>4 Resources"]
     end
 
     P1 -->|bucket name| P2S
@@ -351,23 +351,23 @@ graph TD
 graph TB
     subgraph "Input Variables"
         USER[User Input]
-        VARS[project_id<br/>environment<br/>region]
+        VARS["project_id<br>environment<br>region"]
     end
 
     subgraph "Phase 1"
-        P1_VARS[+ force_destroy<br/>+ bucket_lifecycle_days]
+        P1_VARS["+ force_destroy<br>+ bucket_lifecycle_days"]
         P1_OUT[landing_bucket_name]
     end
 
     subgraph "Phase 2"
-        P2_IN[+ landing_bucket_name<br/>from Phase 1]
-        P2_VARS[+ processor_memory<br/>+ cpu<br/>+ max_instances<br/>+ chunksize<br/>+ image_tag]
+        P2_IN["+ landing_bucket_name<br>from Phase 1"]
+        P2_VARS["+ processor_memory<br>+ cpu<br>+ max_instances<br>+ chunksize<br>+ image_tag"]
         P2_OUT[staging_bucket_name]
     end
 
     subgraph "Phase 3"
-        P3_IN[+ staging_bucket_name<br/>from Phase 2]
-        P3_VARS[+ dataset_id<br/>+ table_id<br/>+ partition_expiration<br/>+ function_memory<br/>+ timeout]
+        P3_IN["+ staging_bucket_name<br>from Phase 2"]
+        P3_VARS["+ dataset_id<br>+ table_id<br>+ partition_expiration<br>+ function_memory<br>+ timeout"]
         P3_OUT[infrastructure deployed]
     end
 
@@ -412,7 +412,7 @@ pie title Total Resources by Phase and Layer
 
 ```mermaid
 graph TD
-    START[Start Deployment] --> CHECK{Have Terraform<br/>State?}
+    START[Start Deployment] --> CHECK{"Have Terraform<br>State?"}
     CHECK -->|No| INIT[terraform init]
     CHECK -->|Yes| PLAN[terraform plan]
 

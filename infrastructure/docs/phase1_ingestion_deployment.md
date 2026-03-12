@@ -93,7 +93,7 @@ gcloud builds submit \
 **Container Details:**
 - Base image: `gcr.io/google.com/cloud-sdk:slim`
 - Script: `src/github_archive/scripts/download.sh`
-- Uses `curl | gsutil cp -` for streaming downloads (memory-efficient)
+- Uses a shell script (`download.sh`) to download files.
 
 ---
 
