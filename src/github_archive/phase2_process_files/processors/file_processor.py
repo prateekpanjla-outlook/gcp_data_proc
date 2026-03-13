@@ -15,13 +15,12 @@ import pandas as pd
 from google.api_core import exceptions as gcp_exceptions
 
 from validators.file_validator import validate_file, should_split_file
-from validators.dtype_validator import DtypeValidator
-from validators.value_validator import ValueValidator
+from validators.validator import validate_chunk
 from processors.transformer import GitHubEventTransformer
 from processors.file_splitter import mark_chunk_processed
 from writers.ndjson_writer import GCSNDJSONWriter, create_output_path
 from utils.gcs_client import GCSClient
-from utils.logger import Phase2Logger
+from utils.logger import get_logger
 
 
 # =============================================================================
@@ -69,7 +68,7 @@ class GitHubArchiveFileProcessor:
         staging_bucket: Optional[str] = None,
         chunksize: int = 100_000,
         file_size_threshold_mb: int = 500,
-        logger: Optional[Phase2Logger] = None
+        logger=None
     ):
         """
         Initialize the file processor.
@@ -89,9 +88,7 @@ class GitHubArchiveFileProcessor:
         self.file_size_threshold_mb = file_size_threshold_mb
 
         # Initialize components
-        self.logger = logger or Phase2Logger(component='file-processor', project_id=self.project_id)
-        self.dtype_validator = DtypeValidator()
-        self.value_validator = ValueValidator()
+        self.logger = logger or get_logger('file-processor')
         self.transformer = GitHubEventTransformer()
         self.gcs_client = GCSClient(project_id=self.project_id)
 
@@ -121,7 +118,7 @@ class GitHubArchiveFileProcessor:
         try:
             metadata = self.gcs_client.get_file_metadata(input_gcs_path)
         except (gcp_exceptions.Forbidden, gcp_exceptions.NotFound) as e:
-            self.logger.log_file_error(file_name, f"Failed to get file metadata: {e}")
+            self.logger.error(f"Failed to get file metadata for {file_name}: {e}")
             return FileProcessingResult(
                 success=False,
                 input_file=input_gcs_path,
@@ -139,7 +136,7 @@ class GitHubArchiveFileProcessor:
         validation_result = validate_file(file_name, metadata.size)
         if not validation_result.is_valid:
             error_msg = '; '.join(validation_result.errors)
-            self.logger.log_file_error(file_name, f"File validation failed test code change: {error_msg}")
+            self.logger.error(f"File validation failed for {file_name}: {error_msg}")
             return FileProcessingResult(
                 success=False,
                 input_file=input_gcs_path,
@@ -155,12 +152,7 @@ class GitHubArchiveFileProcessor:
 
         # Check if file should be split
         if should_split_file(metadata.size, self.file_size_threshold_mb):
-            self.logger.info(
-                f"File exceeds threshold ({self.file_size_threshold_mb}MB), requires splitting",
-                file_name=file_name,
-                file_size_mb=round(metadata.size_mb, 2),
-                action='file_split_required'
-            )
+            self.logger.info(f"File {file_name} ({round(metadata.size_mb, 2)}MB) exceeds threshold ({self.file_size_threshold_mb}MB), requires splitting")
             # In Phase 2, large files should be handled by the file splitter job
             # Return result indicating splitting is needed
             return FileProcessingResult(
@@ -186,27 +178,21 @@ class GitHubArchiveFileProcessor:
             )
 
         # Log start
-        self.logger.log_file_start(file_name, metadata.size)
+        self.logger.info(f"Processing file: {file_name} ({metadata.size} bytes)")
 
         # Process the file
         try:
             result = self._process_with_pandas(input_gcs_path, output_gcs_path, file_name)
 
             # Log completion
-            self.logger.log_file_complete(
-                file_name,
-                result.records_in,
-                result.records_out,
-                result.errors,
-                result.duration_seconds
-            )
+            self.logger.info(f"Completed {file_name}: {result.records_in} in, {result.records_out} out, {result.errors} errors, {result.duration_seconds:.1f}s")
 
             return result
 
         except gcp_exceptions.Forbidden as e:
             # This provides a much clearer error message for permission issues
             error_message = f"Permission Denied during processing. Check IAM roles and bucket policies (e.g., Retention Policy). Details: {e.message}"
-            self.logger.log_file_error(file_name, error_message)
+            self.logger.error(f"{file_name}: {error_message}")
             return FileProcessingResult(
                 success=False, input_file=input_gcs_path, output_file=None, output_files=[],
                 records_in=0, records_out=0, errors=1, warnings=0,
@@ -215,7 +201,7 @@ class GitHubArchiveFileProcessor:
             )
 
         except Exception as e:
-            self.logger.log_file_error(file_name, f"An unexpected error occurred: {e}")
+            self.logger.error(f"{file_name}: An unexpected error occurred: {e}")
             return FileProcessingResult(
                 success=False,
                 input_file=input_gcs_path,
@@ -283,21 +269,12 @@ class GitHubArchiveFileProcessor:
                 records_in_chunk = len(chunk_df)
                 total_records_in += records_in_chunk
 
-                # Validate dtypes
-                dtype_result = self.dtype_validator.validate_input_dtypes(chunk_df)
+                # Validate (dtypes + values in single pass)
+                val_result = validate_chunk(chunk_df)
+                total_errors += len(val_result.errors)
+                total_warnings += len(val_result.warnings)
 
-                # Only count coercion nulls as errors (not source nulls)
-                if dtype_result.coercion_null_counts:
-                    total_errors += sum(dtype_result.coercion_null_counts.values())
-
-                working_df = dtype_result.coerced_df if dtype_result.coerced_df is not None else chunk_df
-
-                # Validate values
-                value_result = self.value_validator.validate_all(working_df)
-                total_errors += value_result.invalid_count
-                total_warnings += value_result.total_warnings
-
-                working_df = value_result.valid_df if value_result.valid_df is not None else working_df
+                working_df = val_result.valid_df if val_result.valid_df is not None else chunk_df
 
                 # Transform (flatten schema)
                 transform_result = self.transformer.transform_chunk(working_df)
@@ -323,12 +300,7 @@ class GitHubArchiveFileProcessor:
                         output_files.append(write_result.output_path)
 
                 # Log progress
-                self.logger.log_chunk_progress(
-                    file_name,
-                    chunks_processed,
-                    -1,  # Unknown total chunks until EOF
-                    records_in_chunk
-                )
+                self.logger.info(f"Chunk {chunks_processed} processed: {records_in_chunk} records")
 
         finally:
             # Clean up temp file
@@ -354,16 +326,9 @@ class GitHubArchiveFileProcessor:
                     chunk_file=input_gcs_path,
                     logger=self.logger
                 )
-                self.logger.info(
-                    f"Chunk marked as processed: {input_gcs_path}",
-                    mark_result=mark_result
-                )
+                self.logger.info(f"Chunk marked as processed: {input_gcs_path}")
             except Exception as mark_err:
-                # Log but don't fail the whole processing
-                self.logger.warning(
-                    f"Failed to mark chunk as processed: {mark_err}",
-                    chunk_file=input_gcs_path
-                )
+                self.logger.warning(f"Failed to mark chunk as processed: {input_gcs_path}: {mark_err}")
 
         # Return result with multiple output files
         return FileProcessingResult(

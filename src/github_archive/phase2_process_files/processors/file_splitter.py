@@ -7,6 +7,7 @@ Each chunk is written to the landing/chunks/ directory, triggering Eventarc even
 
 import os
 import gzip
+import logging
 import tempfile
 import json
 import time
@@ -21,7 +22,7 @@ except ImportError:
     PANDAS_AVAILABLE = False
 
 from utils.gcs_client import GCSClient, GCSPath
-from utils.logger import Phase2Logger
+from utils.logger import get_logger
 from validators.file_validator import FILE_NAME_PATTERN
 
 
@@ -61,7 +62,7 @@ class GitHubArchiveFileSplitter:
         landing_bucket: Optional[str] = None,
         chunk_lines: int = 10_000,
         target_chunk_size_mb: int = 50,
-        logger: Optional[Phase2Logger] = None
+        logger: Optional[logging.Logger] = None
     ):
         """
         Initialize the file splitter.
@@ -78,7 +79,7 @@ class GitHubArchiveFileSplitter:
         self.chunk_lines = chunk_lines
         self.target_chunk_size_mb = target_chunk_size_mb
 
-        self.logger = logger or Phase2Logger(component='file-splitter', project_id=self.project_id)
+        self.logger = logger or get_logger('file-splitter')
         self.gcs_client = GCSClient(project_id=self.project_id)
 
     def split_file(
@@ -107,11 +108,7 @@ class GitHubArchiveFileSplitter:
         if output_prefix is None:
             output_prefix = date_str
 
-        self.logger.info(
-            f"Starting file split: {file_name}",
-            input_file=input_gcs_path,
-            chunk_lines=self.chunk_lines
-        )
+        self.logger.info(f"Starting file split: {file_name}, chunk_lines={self.chunk_lines}")
 
         # Download to temp file
         with tempfile.NamedTemporaryFile(delete=False, suffix='.json.gz') as tmp:
@@ -128,7 +125,7 @@ class GitHubArchiveFileSplitter:
             result = self._split_and_upload_chunks(tmp_path, file_name, output_prefix, file_size)
 
         except Exception as e:
-            self.logger.log_file_error(file_name, f"Split failed: {e}")
+            self.logger.error(f"Split failed for {file_name}: {e}")
             return FileSplitResult(
                 success=False,
                 input_file=input_gcs_path,
@@ -150,13 +147,7 @@ class GitHubArchiveFileSplitter:
         duration = time.time() - start_time
 
         # Log completion
-        self.logger.info(
-            f"Split complete: {result.chunk_count} chunks",
-            input_file=input_gcs_path,
-            chunk_count=result.chunk_count,
-            total_records=result.total_records,
-            duration_seconds=round(duration, 2)
-        )
+        self.logger.info(f"Split complete: {result.chunk_count} chunks, {result.total_records} records, {round(duration, 2)}s")
 
         return result
 
@@ -296,11 +287,7 @@ class GitHubArchiveFileSplitter:
                     for line in lines:
                         gzip_file.write((line + '\n').encode('utf-8'))
 
-            self.logger.debug(
-                f"Uploaded chunk {chunk_num}: {chunk_filename}",
-                lines=line_count,
-                size_bytes=blob.size
-            )
+            self.logger.debug(f"Uploaded chunk {chunk_num}: {chunk_filename}, {line_count} lines")
 
             return gcs_path
 
@@ -339,15 +326,9 @@ def run_splitter_job(
     landing_bucket = landing_bucket or os.getenv('LANDING_BUCKET')
     chunk_lines = int(os.getenv('CHUNK_SIZE_LINES', '10000'))
 
-    logger = Phase2Logger(component='file-splitter', project_id=project_id)
+    logger = get_logger('file-splitter')
 
-    logger.info(
-        "File splitter job started",
-        input_file=input_file,
-        project_id=project_id,
-        landing_bucket=landing_bucket,
-        chunk_lines=chunk_lines
-    )
+    logger.info(f"File splitter job started: {input_file}, chunk_lines={chunk_lines}")
 
     splitter = GitHubArchiveFileSplitter(
         project_id=project_id,
@@ -369,12 +350,7 @@ def run_splitter_job(
     #
     # For now, we keep the original file and log that cleanup is needed.
     if result.success and result.output_files:
-        logger.info(
-            f"Split complete - original file preserved for safety",
-            input_file=input_file,
-            chunk_count=result.chunk_count,
-            note="Original file should be deleted after all chunks are processed"
-        )
+        logger.info(f"Split complete - original file preserved for safety: {input_file}, {result.chunk_count} chunks")
 
         # Write metadata file for cleanup job (future implementation)
         try:
@@ -408,7 +384,7 @@ def _write_split_metadata(
     output_prefix: str,
     chunk_count: int,
     output_files: List[str],
-    logger: Phase2Logger
+    logger: logging.Logger
 ) -> None:
     """
     Write metadata file for tracking split files.
@@ -455,18 +431,14 @@ def _write_split_metadata(
         content_type='application/json'
     )
 
-    logger.info(
-        f"Split metadata written: {metadata_filename}",
-        original_file=original_file,
-        chunk_count=chunk_count
-    )
+    logger.info(f"Split metadata written: {metadata_filename}, {chunk_count} chunks")
 
 
 def mark_chunk_processed(
     project_id: str,
     landing_bucket: str,
     chunk_file: str,
-    logger: Phase2Logger
+    logger: logging.Logger
 ) -> Dict[str, Any]:
     """
     Mark a chunk as processed and check if original can be deleted.
@@ -528,11 +500,7 @@ def mark_chunk_processed(
                 original_blob = bucket.blob(original_path.blob_name)
                 if original_blob.exists():
                     original_blob.delete()
-                    logger.info(
-                        f"Original file deleted after all chunks processed",
-                        original_file=metadata['original_file'],
-                        chunks_processed=len(metadata['chunks_processed'])
-                    )
+                    logger.info(f"Original file deleted after all {len(metadata['chunks_processed'])} chunks processed")
             except Exception as del_err:
                 logger.error(f"Failed to delete original file: {del_err}")
 

@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 # Import the processing components
 from github_archive.phase2_process_files.processors.transformer import GitHubEventTransformer, BatchTransformer
-from github_archive.phase2_process_files.validators.value_validator import ValueValidator
+from github_archive.phase2_process_files.validators.validator import validate_chunk
 from github_archive.phase2_process_files.schemas.dtype_definitions import BIGQUERY_SCHEMA, get_bigquery_schema_json
 
 
@@ -131,23 +131,18 @@ def process_file(
     validation_results = {}
     if validate and not transformed_df.empty:
         print("\nStep 4: Validating data...")
-        validator = ValueValidator(strict_mode=False)
-
-        result = validator.validate_all(
-            transformed_df,
-            validate_timestamps=True,
-            validate_ids=True
-        )
+        result = validate_chunk(transformed_df)
 
         validation_results = {
             'is_valid': result.is_valid,
-            'invalid_count': result.invalid_count,
+            'records_in': result.records_in,
+            'records_out': result.records_out,
             'errors': result.errors,
             'warnings': result.warnings
         }
 
         print(f"  Validation: {'PASSED' if result.is_valid else 'FAILED'}")
-        print(f"  Invalid records: {result.invalid_count}")
+        print(f"  Records: {result.records_in} in, {result.records_out} out")
 
         if result.errors:
             print("  Errors:")
@@ -159,7 +154,6 @@ def process_file(
             for field, count in result.warnings.items():
                 print(f"    {field}: {count}")
 
-        # Use valid dataframe for output
         if result.valid_df is not None:
             transformed_df = result.valid_df
 

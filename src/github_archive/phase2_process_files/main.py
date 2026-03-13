@@ -14,7 +14,7 @@ from flask import Flask, request, jsonify
 from google.cloud import error_reporting
 
 from processors.file_processor import GitHubArchiveFileProcessor
-from utils.logger import Phase2Logger
+from utils.logger import get_logger
 
 
 # =============================================================================
@@ -36,7 +36,7 @@ PORT = int(os.getenv('PORT', '8080'))
 app = Flask(__name__)
 
 # Initialize logger
-logger = Phase2Logger(component='phase2-processor', project_id=PROJECT_ID)
+logger = get_logger('phase2-processor')
 
 # Initialize processor
 processor = GitHubArchiveFileProcessor(
@@ -127,11 +127,7 @@ def process_file_event() -> tuple[Dict[str, Any], int]:
     bucket = event.get('bucket')
     file_name = event.get('name')
 
-    logger.info(
-        "Received Eventarc event",
-        bucket=bucket,
-        file_name=file_name
-    )
+    logger.info(f"Received Eventarc event: bucket={bucket}, file={file_name}")
 
     # Path filtering: Only process files in github-archive/raw/ or github-archive/chunks/
     # Eventarc triggers don't support 'name' attribute filtering for Cloud Storage events
@@ -213,10 +209,7 @@ def process_file_event() -> tuple[Dict[str, Any], int]:
 
         status_code = 200 if result.success else 207  # 207 for partial success
 
-        logger.info(
-            f"Processing {'completed' if result.success else 'failed'}: {file_name}",
-            **response_data
-        )
+        logger.info(f"Processing {'completed' if result.success else 'failed'}: {file_name}, in={result.records_in}, out={result.records_out}")
 
         return jsonify(response_data), status_code
 
@@ -224,11 +217,7 @@ def process_file_event() -> tuple[Dict[str, Any], int]:
         duration = time.time() - start_time
         error_msg = f"Processing error: {str(e)}"
 
-        logger.error(
-            error_msg,
-            file_name=file_name,
-            duration_seconds=round(duration, 2)
-        )
+        logger.error(f"{error_msg} file={file_name} duration={round(duration, 2)}s")
 
         if error_reporter:
             error_reporter.report_exception()
@@ -286,34 +275,11 @@ def process_manual() -> tuple[Dict[str, Any], int]:
         return jsonify({'error': str(e)}), 500
 
 
-# =============================================================================
-# ERROR HANDLERS
-# =============================================================================
-@app.errorhandler(404)
-def not_found(error) -> tuple[Dict[str, Any], int]:
-    """Handle 404 errors."""
-    return jsonify({'error': 'Not found'}), 404
-
-
-@app.errorhandler(500)
-def internal_error(error) -> tuple[Dict[str, Any], int]:
-    """Handle 500 errors."""
-    logger.error(f"Internal error: {error}")
-    if error_reporter:
-        error_reporter.report_exception()
-    return jsonify({'error': 'Internal server error'}), 500
-
 
 # =============================================================================
 # MAIN
 # =============================================================================
 if __name__ == '__main__':
-    logger.info(
-        "Starting GitHub Archive Processor",
-        project=PROJECT_ID,
-        landing_bucket=LANDING_BUCKET,
-        staging_bucket=STAGING_BUCKET,
-        port=PORT
-    )
+    logger.info(f"Starting GitHub Archive Processor: project={PROJECT_ID}, landing={LANDING_BUCKET}, staging={STAGING_BUCKET}, port={PORT}")
 
     app.run(host=HOST, port=PORT, debug=False)
