@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Phase 3 BQ Load Detail</title>
+    <style>
+        body { font-family: monospace; margin: 2rem; background: #1a1a2e; color: #e0e0e0; }
+        h1 { color: #00d4ff; }
+        a { color: #00d4ff; }
+        table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+        th, td { border: 1px solid #333; padding: 8px 12px; text-align: left; }
+        th { background: #16213e; color: #00d4ff; }
+        tr:nth-child(even) { background: #0f3460; }
+        .error { color: #ff6b6b; }
+        .success { color: #6bcb77; }
+        .nav { margin-bottom: 2rem; }
+        .nav a { margin-right: 1.5rem; }
+    </style>
+</head>
+<body>
+    <h1>Phase 3: BigQuery Load Detail</h1>
+    <div class="nav">
+        <a href="/">Overview</a>
+        <a href="/phase2">Phase 2 Detail</a>
+        <a href="/phase3">Phase 3 Detail</a>
+    </div>
+
+    <table>
+        <tr>
+            <th>Date</th>
+            <th>File</th>
+            <th>Rows Loaded</th>
+            <th>Status</th>
+            <th>Timestamp</th>
+        </tr>
+        {% for row in loads %}
+        <tr>
+            <td>{{ row.load_date }}</td>
+            <td>{{ row.file_name }}</td>
+            <td>{{ row.rows_loaded }}</td>
+            <td class="{{ 'success' if row.status == 'success' else 'error' }}">{{ row.status }}</td>
+            <td>{{ row.timestamp }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>
