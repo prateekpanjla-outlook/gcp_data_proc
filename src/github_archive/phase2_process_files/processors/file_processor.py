@@ -192,6 +192,16 @@ def _process_with_pandas(
         output_files = []
         chunks_processed = 0
 
+        # TODO: Memory optimization — current flow creates ~4 DataFrame copies per chunk (~400MB):
+        #   1. chunk_df from pd.read_json
+        #   2. valid_df from validate_chunk (df[mask] copy)
+        #   3. flattened df from flatten_schema (new DataFrame)
+        #   4. to_dict list from write_dataframe_to_gcs
+        # Can reduce to ~2 copies by:
+        #   - validate_chunk returns mask only (no valid_df copy)
+        #   - flatten_schema receives chunk_df[mask] view
+        #   - writer uses itertuples instead of to_dict
+
         # Process chunks sequentially
         for chunk_df in pd.read_json(tmp_path, lines=True, chunksize=chunksize):
             chunks_processed += 1
@@ -212,11 +222,7 @@ def _process_with_pandas(
 
             # Write this chunk immediately to GCS
             if not transform_result.df.empty:
-                # Create chunk-specific output path
-                if chunks_processed == 1:
-                    blob_name = f"processed/{date_prefix}.ndjson.gz"
-                else:
-                    blob_name = f"processed/{date_prefix}-chunk-{chunks_processed:03d}.ndjson.gz"
+                blob_name = f"processed/{date_prefix}-chunk-{chunks_processed:03d}.ndjson.gz"
 
                 write_result = writer.write_dataframe_to_gcs(
                     transform_result.df,

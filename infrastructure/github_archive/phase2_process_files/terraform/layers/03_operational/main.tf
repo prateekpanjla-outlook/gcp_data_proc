@@ -77,8 +77,10 @@ resource "google_cloud_run_v2_service" "processor" {
     # Timeout (duration format with 's' suffix)
     timeout = "3600s" # 1 hour
 
-    # Max concurrent requests per instance
-    max_instance_request_concurrency = 10
+    # TODO: determine safe concurrency for 50MB files with 4GB memory
+    # Peak per request: ~300MB decompression + ~100MB pandas chunk + overhead
+    # Lower concurrency = more instances needed for bursts = review min-instances (warm) count
+    max_instance_request_concurrency = 3
 
     containers {
       # Image for the processor service

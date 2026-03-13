@@ -186,7 +186,7 @@ resource "google_cloudbuild_trigger" "phase2_processor" {
             --cpu 2 \
             --timeout 3600 \
             --max-instances 5 \
-            --concurrency 10 \
+            --concurrency 3 \
             --no-allow-unauthenticated \
             --service-account ${var.environment}-data-pipeline-processor@${var.project_id}.iam.gserviceaccount.com \
             --set-env-vars PROJECT_ID=${var.project_id},LANDING_BUCKET=${var.project_id}-${var.environment}-data-pipeline-landing,STAGING_BUCKET=${var.project_id}-${var.environment}-data-pipeline-staging

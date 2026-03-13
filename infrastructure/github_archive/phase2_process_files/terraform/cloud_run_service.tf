@@ -18,8 +18,11 @@ resource "google_cloud_run_v2_service" "processor" {
     # v2: timeout is a duration string, not timeout_seconds
     timeout = "3600s"
 
-    # v2: max_instance_request_concurrency replaces container_concurrency
-    max_instance_request_concurrency = 10
+    # TODO: determine safe concurrency for 50MB files with 4GB memory
+    # Peak per request: ~300MB decompression + ~100MB pandas chunk + overhead
+    # Lower concurrency = more instances needed for bursts = review min-instances (warm) count
+    # TODO: configure Eventarc dead-letter topic for events that exhaust retries
+    max_instance_request_concurrency = 3
 
     service_account = google_service_account.processor.email
 
