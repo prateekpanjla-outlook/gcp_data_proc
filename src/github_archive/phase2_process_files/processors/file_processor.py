@@ -20,7 +20,7 @@ from google.cloud import storage
 from validators.file_validator import validate_file, validate_chunk
 from processors.transformer import transform_chunk
 
-from writers.ndjson_writer import GCSNDJSONWriter, create_output_path
+from writers.ndjson_writer import write_dataframe_to_gcs
 
 
 logger = logging.getLogger('file-processor')
@@ -66,6 +66,13 @@ def process_file(
         FileProcessingResult with processing statistics
     """
     start_time = time.time()
+    # Single client for the entire file: reused for download + all chunk uploads.
+    # Creating a client per chunk would re-fetch credentials from the metadata server
+    # and open fresh TLS connections on every write — pure overhead at scale.
+    # Worst case: the metadata server (169.254.169.254) throttles credential requests
+    # with HTTP 429s, causing storage operations to fail silently or raise
+    # google.auth.exceptions.TransportError — hard to diagnose in logs since
+    # the error surfaces as a storage failure, not an auth failure.
     storage_client = storage.Client(project=project_id)
 
     # Extract bucket/blob from gs:// path
@@ -120,7 +127,7 @@ def process_file(
     try:
         result = _process_with_pandas(
             blob, file_name, input_gcs_path,
-            project_id, staging_bucket, chunksize
+            storage_client, staging_bucket, chunksize
         )
 
         # Log completion
@@ -148,7 +155,7 @@ def _process_with_pandas(
     blob,
     file_name: str,
     input_gcs_path: str,
-    project_id: str,
+    storage_client,
     staging_bucket: str,
     chunksize: int
 ) -> FileProcessingResult:
@@ -179,13 +186,6 @@ def _process_with_pandas(
 
         # Extract date/hour from filename for output naming
         date_prefix = file_name.replace('.json.gz', '')
-
-        # Initialize GCS writer for streaming uploads
-        writer = GCSNDJSONWriter(
-            compress=True,
-            bucket_name=staging_bucket,
-            project_id=project_id
-        )
 
         # Track output files
         output_files = []
@@ -223,13 +223,13 @@ def _process_with_pandas(
             if not transform_result.df.empty:
                 blob_name = f"processed/{date_prefix}-chunk-{chunks_processed:03d}.ndjson.gz"
 
-                write_result = writer.write_dataframe_to_gcs(
+                output_path = write_dataframe_to_gcs(
                     transform_result.df,
-                    blob_name
+                    blob_name,
+                    storage_client,
+                    staging_bucket
                 )
-
-                if write_result.output_path:
-                    output_files.append(write_result.output_path)
+                output_files.append(output_path)
 
             # Log progress
             logger.info(f"Chunk {chunks_processed} processed: {records_in_chunk} records")
