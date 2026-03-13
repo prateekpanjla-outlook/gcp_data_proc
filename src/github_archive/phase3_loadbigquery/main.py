@@ -5,6 +5,11 @@ Triggered by Cloud Storage events when files are finalized in the staging bucket
 Loads .ndjson.gz files to BigQuery and optionally deletes the source file.
 
 Cloud Functions 2nd gen uses CloudEvents format, not the legacy (data, context) format.
+
+GCP-coupled: This function is tightly bound to GCP — functions_framework for the runtime,
+Eventarc/CloudEvents for event delivery, BigQuery for the load target, and GCS for the
+source files. Unlike Phase 2's core logic (validate/flatten/write), there is no portable
+business logic here; the entire function is GCP integration glue.
 """
 
 import os
