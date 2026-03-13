@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 # Import the processing components
 from github_archive.phase2_process_files.processors.transformer import GitHubEventTransformer
-from github_archive.phase2_process_files.validators.file_data_validator import validate_chunk
+from github_archive.phase2_process_files.validators.file_validator import validate_chunk
 from github_archive.phase2_process_files.schemas.dtype_definitions import BIGQUERY_SCHEMA, get_bigquery_schema_json
 
 

@@ -17,8 +17,7 @@ import pandas as pd
 from google.api_core import exceptions as gcp_exceptions
 from google.cloud import storage
 
-from validators.file_validator import validate_file
-from validators.file_data_validator import validate_chunk
+from validators.file_validator import validate_file, validate_chunk
 from processors.transformer import transform_chunk
 
 from writers.ndjson_writer import GCSNDJSONWriter, create_output_path
