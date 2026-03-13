@@ -31,19 +31,16 @@ class ValidationResult:
 # =============================================================================
 # VALIDATION FUNCTIONS
 # =============================================================================
-def validate_file(file_name: str, file_size_bytes: int, max_size_gb: int = 10) -> ValidationResult:
+def validate_file(file_name: str) -> ValidationResult:
     """
-    Validate a GitHub Archive file.
+    Validate a GitHub Archive file name and format.
 
     Checks:
     1. File name format (YYYY-MM-DD-HH.json.gz)
     2. Gzip extension
-    3. File size is within limit
 
     Args:
         file_name: Name of the file (e.g., 2026-03-05-12.json.gz)
-        file_size_bytes: Size of the file in bytes
-        max_size_gb: Maximum allowed file size in GB (default: 10)
 
     Returns:
         ValidationResult with validation status
@@ -86,18 +83,6 @@ def validate_file(file_name: str, file_size_bytes: int, max_size_gb: int = 10) -
     except ValueError:
         errors.append(f"Invalid date/time format: {date_str}")
 
-    # Check file size
-    max_size_bytes = max_size_gb * 1024 * 1024 * 1024
-    if file_size_bytes > max_size_bytes:
-        errors.append(
-            f"File too large: {file_size_bytes} bytes "
-            f"(maximum: {max_size_gb}GB = {max_size_bytes} bytes)"
-        )
-
-    # Minimum file size check (100 bytes)
-    if file_size_bytes < 100:
-        errors.append(f"File too small: {file_size_bytes} bytes (minimum: 100 bytes)")
-
     return ValidationResult(
         is_valid=len(errors) == 0,
         errors=errors,
@@ -105,16 +90,3 @@ def validate_file(file_name: str, file_size_bytes: int, max_size_gb: int = 10) -
     )
 
 
-def should_split_file(file_size_bytes: int, threshold_mb: int = 500) -> bool:
-    """
-    Determine if a file should be split based on size.
-
-    Args:
-        file_size_bytes: Size of the file in bytes
-        threshold_mb: Threshold in MB
-
-    Returns:
-        True if file should be split
-    """
-    threshold_bytes = threshold_mb * 1024 * 1024
-    return file_size_bytes >= threshold_bytes

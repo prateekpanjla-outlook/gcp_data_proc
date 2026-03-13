@@ -29,11 +29,11 @@ variable "landing_bucket_name" {
 variable "file_size_threshold_mb" {
   description = "File size threshold for splitting (in MB)"
   type        = number
-  default     = 500
+  default     = 50
 
   validation {
-    condition     = var.file_size_threshold_mb >= 100
-    error_message = "File size threshold must be at least 100 MB"
+    condition     = var.file_size_threshold_mb >= 50
+    error_message = "File size threshold must be at least 50 MB"
   }
 }
 

@@ -5,16 +5,15 @@ Receives Eventarc events when files land in the landing bucket,
 validates, transforms, and writes them to the staging bucket.
 """
 
+import logging
 import os
-import json
-import time
-from typing import Dict, Any
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
 
 from flask import Flask, request, jsonify
-from google.cloud import error_reporting
-
-from processors.file_processor import GitHubArchiveFileProcessor
-from utils.logger import get_logger
+from google.api_core import exceptions as gcp_exceptions
+from google.cloud import storage
+from processors.file_processor import process_file
 
 
 # =============================================================================
@@ -23,7 +22,7 @@ from utils.logger import get_logger
 PROJECT_ID = os.getenv('PROJECT_ID')
 LANDING_BUCKET = os.getenv('LANDING_BUCKET')
 STAGING_BUCKET = os.getenv('STAGING_BUCKET')
-FILE_SIZE_THRESHOLD_MB = int(os.getenv('FILE_SIZE_THRESHOLD_MB', '500'))
+FILE_SIZE_THRESHOLD_MB = int(os.getenv('FILE_SIZE_THRESHOLD_MB', '50'))
 CHUNKSIZE = int(os.getenv('CHUNKSIZE', '100000'))
 
 # Cloud Run requires 0.0.0.0 binding
@@ -36,24 +35,10 @@ PORT = int(os.getenv('PORT', '8080'))
 app = Flask(__name__)
 
 # Initialize logger
-logger = get_logger('phase2-processor')
+logger = logging.getLogger('phase2-processor')
 
-# Initialize processor
-processor = GitHubArchiveFileProcessor(
-    project_id=PROJECT_ID,
-    landing_bucket=LANDING_BUCKET,
-    staging_bucket=STAGING_BUCKET,
-    chunksize=CHUNKSIZE,
-    file_size_threshold_mb=FILE_SIZE_THRESHOLD_MB,
-    logger=logger
-)
-
-# Error reporting
-error_reporter = None
-try:
-    error_reporter = error_reporting.Client()
-except Exception:
-    pass
+# Initialize storage client
+storage_client = storage.Client(project=PROJECT_ID)
 
 
 # =============================================================================
@@ -61,7 +46,7 @@ except Exception:
 # =============================================================================
 @app.route('/', methods=['GET'])
 @app.route('/health', methods=['GET'])
-def health_check() -> tuple[Dict[str, Any], int]:
+def health_check():
     """Health check endpoint."""
     return jsonify({
         'status': 'healthy',
@@ -72,34 +57,12 @@ def health_check() -> tuple[Dict[str, Any], int]:
     }), 200
 
 
-# =============================================================================
-# READINESS PROBE
-# =============================================================================
-@app.route('/ready', methods=['GET'])
-def readiness_check() -> tuple[Dict[str, Any], int]:
-    """Readiness check endpoint."""
-    checks = {
-        'config_valid': all([
-            PROJECT_ID,
-            LANDING_BUCKET,
-            STAGING_BUCKET
-        ])
-    }
-
-    ready = all(checks.values())
-
-    status_code = 200 if ready else 503
-    return jsonify({
-        'ready': ready,
-        'checks': checks
-    }), status_code
-
 
 # =============================================================================
 # MAIN PROCESSING HANDLER (Eventarc trigger)
 # =============================================================================
 @app.route('/', methods=['POST'])
-def process_file_event() -> tuple[Dict[str, Any], int]:
+def process_file_event():
     """
     Handle Eventarc event for new files in landing bucket.
 
@@ -111,8 +74,6 @@ def process_file_event() -> tuple[Dict[str, Any], int]:
         "metageneration": "1"
     }
     """
-    start_time = time.time()
-
     # Parse event payload
     try:
         event = request.get_json()
@@ -129,69 +90,41 @@ def process_file_event() -> tuple[Dict[str, Any], int]:
 
     logger.info(f"Received Eventarc event: bucket={bucket}, file={file_name}")
 
-    # Path filtering: Only process files in github-archive/raw/ or github-archive/chunks/
-    # Eventarc triggers don't support 'name' attribute filtering for Cloud Storage events
+    # Path filtering: Only process files in github-archive/raw/*.json.gz
+    reason = None
     if not file_name or not file_name.startswith('github-archive/'):
-        logger.info(f"Ignoring file outside github-archive/ path: {file_name}")
-        return jsonify({'status': 'ignored', 'reason': 'path_not_matching'}), 200
+        reason = 'path_not_matching'
+    elif not file_name.endswith('.json.gz'):
+        reason = 'extension_not_matching'
+    elif '/raw/' not in file_name:
+        reason = 'subdirectory_not_matching'
 
-    if not file_name.endswith('.json.gz'):
-        logger.info(f"Ignoring non-.json.gz file: {file_name}")
-        return jsonify({'status': 'ignored', 'reason': 'extension_not_matching'}), 200
-
-    # Validate path patterns: raw/ or chunks/ subdirectories
-    if not ('/raw/' in file_name or '/chunks/' in file_name):
-        logger.info(f"Ignoring file not in raw/ or chunks/ path: {file_name}")
-        return jsonify({'status': 'ignored', 'reason': 'subdirectory_not_matching'}), 200
+    if reason:
+        logger.info(f"Ignoring file: {file_name} ({reason})")
+        return jsonify({'status': 'ignored', 'reason': reason}), 200
 
     # Build full GCS path
     input_gcs_path = f"gs://{bucket}/{file_name}"
 
+    # Check file size before processing
+    try:
+        blob = storage_client.bucket(bucket).blob(file_name)
+        blob.reload()
+        file_size_mb = blob.size / (1024 * 1024)
+        if file_size_mb > FILE_SIZE_THRESHOLD_MB:
+            logger.error(f"File too large: {file_name} ({file_size_mb:.1f}MB) exceeds {FILE_SIZE_THRESHOLD_MB}MB threshold")
+            return jsonify({
+                'status': 'rejected',
+                'error': f'File exceeds {FILE_SIZE_THRESHOLD_MB}MB threshold',
+                'input_file': input_gcs_path
+            }), 413
+    except (gcp_exceptions.Forbidden, gcp_exceptions.NotFound) as e:
+        logger.error(f"Failed to get file metadata for {file_name}: {e}")
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
     # Process the file
     try:
-        result = processor.process_file(input_gcs_path)
-
-        duration = time.time() - start_time
-
-        # Handle file split required case
-        if result.error_message == 'FILE_SPLIT_REQUIRED':
-            # Trigger file splitter job
-            from google.cloud import run_v2
-            from processors.file_splitter import run_splitter_job
-
-            logger.info(f"Triggering file splitter for: {file_name}")
-
-            try:
-                # Execute file splitter job
-                # Note: In production, you might want to use Cloud Tasks or Pub/Sub
-                # to trigger this asynchronously
-                split_result = run_splitter_job(
-                    input_file=input_gcs_path,
-                    project_id=PROJECT_ID,
-                    landing_bucket=LANDING_BUCKET
-                )
-
-                response_data = {
-                    'status': 'split',
-                    'action': 'file_splitter_executed',
-                    'input_file': input_gcs_path,
-                    'chunk_count': split_result['chunk_count'],
-                    'total_records': split_result['total_records'],
-                    'output_files': split_result['output_files'],
-                    'duration_seconds': round(duration, 2)
-                }
-
-                logger.info(f"File split completed: {split_result['chunk_count']} chunks created")
-
-                return jsonify(response_data), 200
-
-            except Exception as split_error:
-                logger.error(f"File splitter failed: {split_error}")
-                return jsonify({
-                    'status': 'error',
-                    'error': f'File splitter failed: {str(split_error)}',
-                    'input_file': input_gcs_path
-                }), 500
+        result = process_file(input_gcs_path, PROJECT_ID, STAGING_BUCKET, CHUNKSIZE)
 
         # Normal processing response
         response_data = {
@@ -199,12 +132,11 @@ def process_file_event() -> tuple[Dict[str, Any], int]:
             'input_file': result.input_file,
             'output_file': result.output_file,
             'output_files': result.output_files or [],
-            'output_count': result.output_count,
+            'output_count': len(result.output_files),
             'records_in': result.records_in,
             'records_out': result.records_out,
             'errors': result.errors,
-            'warnings': result.warnings,
-            'duration_seconds': round(duration, 2)
+            'warnings': result.warnings
         }
 
         status_code = 200 if result.success else 207  # 207 for partial success
@@ -214,65 +146,13 @@ def process_file_event() -> tuple[Dict[str, Any], int]:
         return jsonify(response_data), status_code
 
     except Exception as e:
-        duration = time.time() - start_time
         error_msg = f"Processing error: {str(e)}"
-
-        logger.error(f"{error_msg} file={file_name} duration={round(duration, 2)}s")
-
-        if error_reporter:
-            error_reporter.report_exception()
+        logger.error(f"{error_msg} file={file_name}")
 
         return jsonify({
             'status': 'error',
-            'error': error_msg,
-            'duration_seconds': round(duration, 2)
+            'error': error_msg
         }), 500
-
-
-# =============================================================================
-# MANUAL TRIGGER (for testing)
-# =============================================================================
-@app.route('/process', methods=['POST'])
-def process_manual() -> tuple[Dict[str, Any], int]:
-    """
-    Manually trigger processing of a file.
-
-    Request body:
-    {
-        "file_path": "gs://bucket/path/to/file.json.gz"
-    }
-    """
-    try:
-        data = request.get_json()
-        file_path = data.get('file_path')
-
-        if not file_path:
-            return jsonify({'error': 'file_path is required'}), 400
-
-        # Validate path format
-        if not file_path.startswith('gs://'):
-            return jsonify({'error': 'file_path must be a gs:// path'}), 400
-
-        logger.info(f"Manual processing request for: {file_path}")
-
-        result = processor.process_file(file_path)
-
-        return jsonify({
-            'status': 'success' if result.success else 'failed',
-            'input_file': result.input_file,
-            'output_file': result.output_file,
-            'records_in': result.records_in,
-            'records_out': result.records_out,
-            'errors': result.errors,
-            'warnings': result.warnings,
-            'duration_seconds': result.duration_seconds
-        }), 200 if result.success else 500
-
-    except Exception as e:
-        logger.error(f"Manual processing error: {e}")
-        if error_reporter:
-            error_reporter.report_exception()
-        return jsonify({'error': str(e)}), 500
 
 
 

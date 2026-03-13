@@ -26,8 +26,8 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 # Import the processing components
-from github_archive.phase2_process_files.processors.transformer import GitHubEventTransformer, BatchTransformer
-from github_archive.phase2_process_files.validators.validator import validate_chunk
+from github_archive.phase2_process_files.processors.transformer import GitHubEventTransformer
+from github_archive.phase2_process_files.validators.file_data_validator import validate_chunk
 from github_archive.phase2_process_files.schemas.dtype_definitions import BIGQUERY_SCHEMA, get_bigquery_schema_json
 
 
@@ -109,15 +109,12 @@ def process_file(
     # Transform data
     print("\nStep 3: Transforming data...")
     transformer = GitHubEventTransformer()
-    batch_transformer = BatchTransformer(chunksize=chunksize)
+    result = transformer.transform_chunk(df)
+    transformed_df = result.df
 
-    transformed_df = batch_transformer.transform_dataframe(df)
-
-    stats = batch_transformer.get_stats()
-    print(f"  Records in: {stats['total_records_in']}")
-    print(f"  Records out: {stats['total_records_out']}")
-    print(f"  Errors: {stats['total_errors']}")
-    print(f"  Chunks processed: {stats['chunks_processed']}")
+    print(f"  Records in: {result.records_in}")
+    print(f"  Records out: {result.records_out}")
+    print(f"  Errors: {result.error_count}")
 
     # Show sample of transformed data
     print("\n  Sample transformed record:")

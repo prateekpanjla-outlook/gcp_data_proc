@@ -246,29 +246,6 @@ VALIDATION_RULES: List[ValidationRule] = [
 ]
 
 
-# =============================================================================
-# PROCESSING CONFIGURATION
-# =============================================================================
-@dataclass
-class ProcessingConfig:
-    """Configuration for event processing."""
-    # Chunked processing
-    chunksize: int = 100_000
-
-    # File size threshold (MB) - above this, split the file
-    file_size_threshold_mb: int = 500
-
-    # Validation
-    strict_mode: bool = False  # If True, abort on any validation error
-
-    # Output
-    output_compression: bool = True
-    output_format: str = 'ndjson'  # ndjson or json
-
-
-# Default configuration
-DEFAULT_CONFIG = ProcessingConfig()
-
 
 # =============================================================================
 # BIGQUERY OUTPUT SCHEMA

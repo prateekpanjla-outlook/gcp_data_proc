@@ -5,8 +5,7 @@ Flattens nested JSON structures into the staging schema format.
 """
 
 import pandas as pd
-import json
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from dataclasses import dataclass
 
 # Import field mappings from source of truth
@@ -44,387 +43,178 @@ PAYLOAD_FIELD_MAPPING = {
 
 
 # =============================================================================
-# TRANSFORMER
+# TRANSFORMER FUNCTIONS
 # =============================================================================
-class GitHubEventTransformer:
-    """
-    Transforms GitHub Archive events from nested JSON to flattened schema.
+def _safe_get(obj: Any, field: str, default: Any = None) -> Any:
+    """Safely get a field from a dictionary."""
+    if isinstance(obj, dict):
+        return obj.get(field, default)
+    return default
 
-    Uses vectorized Pandas operations for efficient processing.
-    """
 
-    def __init__(self):
-        """Initialize the transformer."""
-        pass
-
-    def extract_actor_fields(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Extract actor fields from nested actor object.
-
-        Args:
-            df: Input dataframe with 'actor' column containing nested objects
-
-        Returns:
-            Dataframe with extracted actor fields
-        """
-        if 'actor' not in df.columns:
-            return df
-
-        result = df.copy()
-
-        # Extract each actor field
-        for source_field, target_field in ACTOR_FIELD_MAPPING.items():
-            result[target_field] = result['actor'].apply(
-                lambda x: self._safe_get(x, source_field),
-                meta=(target_field, 'object')
-            )
-
-        return result
-
-    def extract_repo_fields(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Extract repo fields from nested repo object.
-
-        Args:
-            df: Input dataframe with 'repo' column containing nested objects
-
-        Returns:
-            Dataframe with extracted repo fields
-        """
-        if 'repo' not in df.columns:
-            return df
-
-        result = df.copy()
-
-        # Extract each repo field
-        for source_field, target_field in REPO_FIELD_MAPPING.items():
-            result[target_field] = result['repo'].apply(
-                lambda x: self._safe_get(x, source_field),
-                meta=(target_field, 'object')
-            )
-
-        return result
-
-    def extract_payload_fields(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Extract common payload fields.
-
-        Args:
-            df: Input dataframe with 'payload' column containing nested objects
-
-        Returns:
-            Dataframe with extracted payload fields
-        """
-        if 'payload' not in df.columns:
-            return df
-
-        result = df.copy()
-
-        # Extract each payload field
-        for source_field, target_field in PAYLOAD_FIELD_MAPPING.items():
-            result[target_field] = result['payload'].apply(
-                lambda x: self._safe_get(x, source_field),
-                meta=(target_field, 'object')
-            )
-
-        return result
-
-    def flatten_schema(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Transform nested schema to flattened staging schema.
-
-        Args:
-            df: Input dataframe with nested GitHub events
-
-        Returns:
-            Flattened dataframe ready for staging output
-        """
-        # Start with core fields
-        result = pd.DataFrame()
-
-        # Map core fields
-        result['event_id'] = df.get('id', pd.Series(dtype='string'))
-        result['event_type'] = df.get('type', pd.Series(dtype='string'))
-        result['created_at'] = df.get('created_at', pd.Series(dtype='string'))
-        result['public'] = df.get('public', True)
-
-        # Extract nested fields
-        result = self._merge_extracted(result, df, ['actor'], ACTOR_FIELD_MAPPING)
-        result = self._merge_extracted(result, df, ['repo'], REPO_FIELD_MAPPING)
-        result = self._merge_extracted(result, df, ['payload'], PAYLOAD_FIELD_MAPPING)
-
-        # Extract deeply nested fields (e.g., payload.issue.labels)
-        result = self._merge_extracted_nested(result, df, ['payload', 'issue'], ISSUE_FIELD_MAPPING)
-
-        # Add ETL metadata columns
-        result['etl_create_ts'] = pd.Timestamp.now(tz='UTC')
-        result['etl_create_id'] = "GITHUB_PROCESSOR"
-
-        return result
-
-    def _merge_extracted(
-        self,
-        result: pd.DataFrame,
-        source_df: pd.DataFrame,
-        source_columns: List[str],
-        field_mapping: Dict[str, str]
-    ) -> pd.DataFrame:
-        """Merge extracted fields into result dataframe."""
-        for source_col in source_columns:
-            if source_col not in source_df.columns:
-                # Add empty columns with default None
-                for target_field in field_mapping.values():
-                    if target_field not in result.columns:
-                        result[target_field] = None
-                continue
-
-            for source_field, target_field in field_mapping.items():
-                if target_field not in result.columns:
-                    result[target_field] = source_df[source_col].apply(
-                        lambda x: self._safe_get(x, source_field) if isinstance(x, dict) else None
-                    )
-
-        return result
-
-    def _merge_extracted_nested(
-        self,
-        result: pd.DataFrame,
-        source_df: pd.DataFrame,
-        path_parts: List[str],
-        field_mapping: Dict[str, str]
-    ) -> pd.DataFrame:
-        """
-        Merge extracted fields from nested path (e.g., payload.issue.labels).
-
-        Navigates multiple levels of nesting to extract fields.
-
-        Args:
-            result: Result dataframe to add fields to
-            source_df: Source dataframe with nested data
-            path_parts: List of keys to navigate (e.g., ['payload', 'issue'])
-            field_mapping: Mapping of final field name to target column name
-
-        Returns:
-            Dataframe with extracted nested fields
-        """
-        if not path_parts or path_parts[0] not in source_df.columns:
-            # Add empty columns for all mapped fields
+def _merge_extracted(
+    result: pd.DataFrame,
+    source_df: pd.DataFrame,
+    source_columns: List[str],
+    field_mapping: Dict[str, str]
+) -> pd.DataFrame:
+    """Merge extracted fields into result dataframe."""
+    for source_col in source_columns:
+        if source_col not in source_df.columns:
+            # Add empty columns with default None
             for target_field in field_mapping.values():
                 if target_field not in result.columns:
                     result[target_field] = None
-            return result
+            continue
 
-        # Navigate the nested path step by step
-        current_data = source_df[path_parts[0]]
-        for part in path_parts[1:]:
-            current_data = current_data.apply(
-                lambda x: self._safe_get(x, part) if isinstance(x, dict) else None
-            )
-
-        # Extract fields from the final nested object
         for source_field, target_field in field_mapping.items():
             if target_field not in result.columns:
-                result[target_field] = current_data.apply(
-                    lambda x: self._safe_get(x, source_field) if isinstance(x, dict) else None
+                result[target_field] = source_df[source_col].apply(
+                    lambda x: _safe_get(x, source_field) if isinstance(x, dict) else None
                 )
 
+    return result
+
+
+def _merge_extracted_nested(
+    result: pd.DataFrame,
+    source_df: pd.DataFrame,
+    path_parts: List[str],
+    field_mapping: Dict[str, str]
+) -> pd.DataFrame:
+    """
+    Merge extracted fields from nested path (e.g., payload.issue.labels).
+
+    Navigates multiple levels of nesting to extract fields.
+    """
+    if not path_parts or path_parts[0] not in source_df.columns:
+        # Add empty columns for all mapped fields
+        for target_field in field_mapping.values():
+            if target_field not in result.columns:
+                result[target_field] = None
         return result
 
-    def _safe_get(self, obj: Any, field: str, default: Any = None) -> Any:
-        """Safely get a field from a dictionary."""
-        if isinstance(obj, dict):
-            return obj.get(field, default)
-        return default
+    # Navigate the nested path step by step
+    current_data = source_df[path_parts[0]]
+    for part in path_parts[1:]:
+        current_data = current_data.apply(
+            lambda x: _safe_get(x, part) if isinstance(x, dict) else None
+        )
 
-    def _safe_get_nested(self, obj: Any, keys: List[str], default: Any = None) -> Any:
-        """
-        Safely get a nested field from a dictionary using a list of keys.
-
-        Args:
-            obj: The object to traverse (typically a dict)
-            keys: List of keys to traverse in order (e.g., ['issue', 'labels'])
-            default: Default value if any key in path is missing
-
-        Returns:
-            The value at the nested path, or default if path doesn't exist
-        """
-        if not isinstance(obj, dict):
-            return default
-
-        current = obj
-        for key in keys:
-            if not isinstance(current, dict) or key not in current:
-                return default
-            current = current[key]
-        return current
-
-    def transform_chunk(self, df: pd.DataFrame) -> TransformationResult:
-        """
-        Transform a chunk of GitHub events.
-
-        Args:
-            df: Input dataframe with nested GitHub events
-
-        Returns:
-            TransformationResult with flattened dataframe
-        """
-        records_in = len(df)
-
-        try:
-            # Flatten schema
-            flattened = self.flatten_schema(df)
-
-            # Ensure proper dtypes
-            flattened = self._ensure_dtypes(flattened)
-
-            records_out = len(flattened)
-
-            return TransformationResult(
-                df=flattened,
-                records_in=records_in,
-                records_out=records_out,
-                error_count=records_in - records_out
+    # Extract fields from the final nested object
+    for source_field, target_field in field_mapping.items():
+        if target_field not in result.columns:
+            result[target_field] = current_data.apply(
+                lambda x: _safe_get(x, source_field) if isinstance(x, dict) else None
             )
 
-        except Exception as e:
-            # Return empty dataframe on error
-            return TransformationResult(
-                df=pd.DataFrame(),
-                records_in=records_in,
-                records_out=0,
-                error_count=records_in
-            )
-
-    def _ensure_dtypes(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Ensure proper dtypes for output columns."""
-        # String columns
-        string_cols = [
-            'event_id', 'event_type', 'created_at',
-            'actor_login', 'actor_display_login', 'actor_avatar_url', 'actor_gravatar_id',
-            'actor_type', 'actor_url',
-            'repo_name', 'repo_url',
-            'payload_ref', 'payload_ref_type',
-            'payload_head', 'payload_before',
-            'etl_create_id'
-        ]
-
-        for col in string_cols:
-            if col in df.columns:
-                df[col] = df[col].astype('string')
-
-        # Integer columns (nullable Int64 - handles JSON null properly)
-        int_cols = [
-            'actor_id', 'repo_id', 'payload_push_id',
-            'payload_size', 'payload_distinct_size'
-        ]
-
-        for col in int_cols:
-            if col in df.columns:
-                df[col] = df[col].astype('Int64')
-
-        # Boolean columns
-        bool_cols = ['public', 'actor_site_admin']
-
-        for col in bool_cols:
-            if col in df.columns:
-                df[col] = df[col].astype('boolean')
-
-        return df
+    return result
 
 
-# =============================================================================
-# BATCH TRANSFORMER
-# =============================================================================
-class BatchTransformer:
+def flatten_schema(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Transforms multiple chunks of GitHub events.
-
-    Processes chunks sequentially and aggregates results.
-    """
-
-    def __init__(self, chunksize: int = 100_000):
-        """
-        Initialize the batch transformer.
-
-        Args:
-            chunksize: Number of records per chunk
-        """
-        self.chunksize = chunksize
-        self.transformer = GitHubEventTransformer()
-        self.stats = {
-            'total_records_in': 0,
-            'total_records_out': 0,
-            'total_errors': 0,
-            'chunks_processed': 0,
-        }
-
-    def transform_dataframe(
-        self,
-        df: pd.DataFrame
-    ) -> pd.DataFrame:
-        """
-        Transform a dataframe in chunks.
-
-        Args:
-            df: Input dataframe
-
-        Returns:
-            Transformed dataframe
-        """
-        results = []
-
-        # Process in chunks
-        for start_idx in range(0, len(df), self.chunksize):
-            end_idx = min(start_idx + self.chunksize, len(df))
-            chunk = df.iloc[start_idx:end_idx].copy()
-
-            result = self.transformer.transform_chunk(chunk)
-            results.append(result.df)
-
-            # Update stats
-            self.stats['total_records_in'] += result.records_in
-            self.stats['total_records_out'] += result.records_out
-            self.stats['total_errors'] += result.error_count
-            self.stats['chunks_processed'] += 1
-
-        # Concatenate results
-        if results:
-            return pd.concat(results, ignore_index=True)
-        return pd.DataFrame()
-
-    def get_stats(self) -> Dict[str, int]:
-        """Get transformation statistics."""
-        return self.stats.copy()
-
-    def reset_stats(self) -> None:
-        """Reset transformation statistics."""
-        self.stats = {
-            'total_records_in': 0,
-            'total_records_out': 0,
-            'total_errors': 0,
-            'chunks_processed': 0,
-        }
-
-
-# =============================================================================
-# HELPER FUNCTIONS
-# =============================================================================
-def transform_event_record(record: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Transform a single GitHub event record.
+    Transform nested schema to flattened staging schema.
 
     Args:
-        record: Single event record with nested structure
+        df: Input dataframe with nested GitHub events
 
     Returns:
-        Flattened event record
+        Flattened dataframe ready for staging output
     """
-    transformer = GitHubEventTransformer()
+    # Start with core fields
+    result = pd.DataFrame()
 
-    # Convert to dataframe for consistent processing
-    df = pd.DataFrame([record])
-    result = transformer.transform_chunk(df)
+    # Map core fields
+    result['event_id'] = df.get('id', pd.Series(dtype='string'))
+    result['event_type'] = df.get('type', pd.Series(dtype='string'))
+    result['created_at'] = df.get('created_at', pd.Series(dtype='string'))
+    result['public'] = df.get('public', True)
 
-    if not result.df.empty:
-        return result.df.iloc[0].to_dict()
-    return {}
+    # Extract nested fields
+    result = _merge_extracted(result, df, ['actor'], ACTOR_FIELD_MAPPING)
+    result = _merge_extracted(result, df, ['repo'], REPO_FIELD_MAPPING)
+    result = _merge_extracted(result, df, ['payload'], PAYLOAD_FIELD_MAPPING)
+
+    # Extract deeply nested fields (e.g., payload.issue.labels)
+    result = _merge_extracted_nested(result, df, ['payload', 'issue'], ISSUE_FIELD_MAPPING)
+
+    # Add ETL metadata columns
+    result['etl_create_ts'] = pd.Timestamp.now(tz='UTC')
+    result['etl_create_id'] = "GITHUB_PROCESSOR"
+
+    return result
+
+
+def _ensure_dtypes(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure proper dtypes for output columns."""
+    # String columns
+    string_cols = [
+        'event_id', 'event_type', 'created_at',
+        'actor_login', 'actor_display_login', 'actor_avatar_url', 'actor_gravatar_id',
+        'actor_type', 'actor_url',
+        'repo_name', 'repo_url',
+        'payload_ref', 'payload_ref_type',
+        'payload_head', 'payload_before',
+        'etl_create_id'
+    ]
+
+    for col in string_cols:
+        if col in df.columns:
+            df[col] = df[col].astype('string')
+
+    # Integer columns (nullable Int64 - handles JSON null properly)
+    int_cols = [
+        'actor_id', 'repo_id', 'payload_push_id',
+        'payload_size', 'payload_distinct_size'
+    ]
+
+    for col in int_cols:
+        if col in df.columns:
+            df[col] = df[col].astype('Int64')
+
+    # Boolean columns
+    bool_cols = ['public', 'actor_site_admin']
+
+    for col in bool_cols:
+        if col in df.columns:
+            df[col] = df[col].astype('boolean')
+
+    return df
+
+
+def transform_chunk(df: pd.DataFrame) -> TransformationResult:
+    """
+    Transform a chunk of GitHub events.
+
+    Args:
+        df: Input dataframe with nested GitHub events
+
+    Returns:
+        TransformationResult with flattened dataframe
+    """
+    records_in = len(df)
+
+    try:
+        # Flatten schema
+        flattened = flatten_schema(df)
+
+        # Ensure proper dtypes
+        flattened = _ensure_dtypes(flattened)
+
+        records_out = len(flattened)
+
+        return TransformationResult(
+            df=flattened,
+            records_in=records_in,
+            records_out=records_out,
+            error_count=records_in - records_out
+        )
+
+    except Exception as e:
+        # Return empty dataframe on error
+        return TransformationResult(
+            df=pd.DataFrame(),
+            records_in=records_in,
+            records_out=0,
+            error_count=records_in
+        )

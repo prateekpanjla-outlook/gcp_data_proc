@@ -30,14 +30,6 @@ class WriteResult:
     output_path: str
     compressed: bool
 
-    @property
-    def size_kb(self) -> float:
-        return self.bytes_written / 1024
-
-    @property
-    def size_mb(self) -> float:
-        return self.bytes_written / (1024 * 1024)
-
 
 # =============================================================================
 # NDJSON WRITER
