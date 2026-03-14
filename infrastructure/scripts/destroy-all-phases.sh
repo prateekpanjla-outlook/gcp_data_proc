@@ -2,7 +2,7 @@
 # Destroy All Phases of GitHub Archive Pipeline
 # Usage: ./destroy-all-phases.sh <PROJECT_ID> <ENVIRONMENT> [REGION]
 #
-# Destroys in reverse order: Phase 3 (L03 -> L02 -> L01) -> Phase 2 -> Phase 1
+# Destroys in reverse order: Phase 4 (L03 -> L02 -> L01) -> Phase 3 -> Phase 2 -> Phase 1
 # Empties buckets before destroying Phase 1 (force_destroy workaround).
 #
 # Example:
@@ -65,12 +65,116 @@ tf_destroy() {
   local dir="$1"
   shift
   echo "  terraform init..."
-  terraform -chdir="${dir}" init -input=false -no-color > /dev/null 2>&1
+  terraform -chdir="${dir}" init -input=false -no-color
   echo "  terraform destroy..."
   terraform -chdir="${dir}" destroy -auto-approve -input=false "$@"
 }
 
+# Helper to verify terraform state is empty after destroy
+verify_empty_state() {
+  local dir="$1"
+  local remaining
+  remaining=$(terraform -chdir="${dir}" state list 2>/dev/null)
+  if [[ -n "${remaining}" ]]; then
+    echo "  WARNING: State not empty, cleaning up..."
+    echo "  Remaining: ${remaining}"
+    terraform -chdir="${dir}" destroy -auto-approve -input=false "$@" || true
+  fi
+}
+
 DESTROY_START=$(date +%s)
+
+# =============================================================================
+# Phase 4: Monitoring Dashboard (reverse layer order)
+# =============================================================================
+echo ""
+echo "========================================="
+echo "Phase 4: Monitoring Dashboard (destroying)"
+echo "========================================="
+PHASE4_BASE="${BASE}/phase4_monitoring/terraform/layers"
+DASHBOARD_SA="${ENVIRONMENT}-pipeline-dashboard@${PROJECT_ID}.iam.gserviceaccount.com"
+PIPELINE_LOGS_DATASET="${ENVIRONMENT}_pipeline_logs"
+
+# Layer 03: Operational
+echo ""
+echo "--- Layer 03: Operational ---"
+terraform -chdir="${PHASE4_BASE}/03_operational" init -upgrade -input=false -no-color
+terraform -chdir="${PHASE4_BASE}/03_operational" destroy -auto-approve -input=false \
+  -var="project_id=${PROJECT_ID}" \
+  -var="environment=${ENVIRONMENT}" \
+  -var="dashboard_sa_email=${DASHBOARD_SA}" \
+  -var="pipeline_logs_dataset_id=${PIPELINE_LOGS_DATASET}" \
+  -var="artifact_registry_repo=${ENVIRONMENT}-github-archive" \
+  -var="deployer_sa_key_path=${KEY_PATH}" || true
+
+# Layer 02: First-time
+echo ""
+echo "--- Layer 02: First-time ---"
+terraform -chdir="${PHASE4_BASE}/02_first_time" init -upgrade -input=false -no-color
+terraform -chdir="${PHASE4_BASE}/02_first_time" destroy -auto-approve -input=false \
+  -var="project_id=${PROJECT_ID}" \
+  -var="environment=${ENVIRONMENT}" \
+  -var="dashboard_sa_email=${DASHBOARD_SA}" \
+  -var="pipeline_logs_dataset_id=${PIPELINE_LOGS_DATASET}" || true
+
+# Layer 01: Static
+echo ""
+echo "--- Layer 01: Static ---"
+tf_destroy "${PHASE4_BASE}/01_static" \
+  -var="project_id=${PROJECT_ID}" \
+  -var="environment=${ENVIRONMENT}" || true
+
+# Verify Phase 4 state is clean
+echo ""
+echo "--- Verifying Phase 4 state ---"
+for layer in 03_operational 02_first_time 01_static; do
+  remaining=$(terraform -chdir="${PHASE4_BASE}/${layer}" state list 2>/dev/null)
+  if [[ -n "${remaining}" ]]; then
+    echo "  WARNING: ${layer} has stale state: ${remaining}"
+    echo "  Removing from state..."
+    for resource in ${remaining}; do
+      terraform -chdir="${PHASE4_BASE}/${layer}" state rm "${resource}" 2>/dev/null || true
+    done
+  else
+    echo "  ${layer}: clean"
+  fi
+done
+
+# =============================================================================
+# Clean stale SA entries from github_archive dataset
+# Phase 4 SA was just deleted — BQ renames it to "deleted:serviceAccount:..."
+# which blocks Phase 3 IAM destroy. Must clean before Phase 3 runs.
+# =============================================================================
+echo ""
+echo "--- Cleaning stale SA entries from github_archive dataset ---"
+STALE_ENTRIES=$(bq show --format=prettyjson "${PROJECT_ID}:github_archive" 2>/dev/null | grep -o '"deleted:serviceAccount:[^"]*"' || true)
+if [[ -n "${STALE_ENTRIES}" ]]; then
+  for entry in ${STALE_ENTRIES}; do
+    MEMBER=$(echo "${entry}" | tr -d '"')
+    echo "  Revoking stale entry: ${MEMBER}"
+    bq query --project_id="${PROJECT_ID}" --nouse_legacy_sql \
+      "REVOKE \`roles/bigquery.dataViewer\` ON SCHEMA \`${PROJECT_ID}.github_archive\` FROM \"${MEMBER}\"" 2>/dev/null || true
+  done
+
+  # Verify stale entries are removed (poll up to 2 minutes)
+  echo "  Verifying stale entries are removed..."
+  MAX_ATTEMPTS=12
+  for i in $(seq 1 ${MAX_ATTEMPTS}); do
+    REMAINING=$(bq show --format=prettyjson "${PROJECT_ID}:github_archive" 2>/dev/null | grep "deleted:serviceAccount:" || true)
+    if [[ -z "${REMAINING}" ]]; then
+      echo "  Stale entries confirmed removed (attempt ${i}/${MAX_ATTEMPTS})."
+      break
+    fi
+    if [[ ${i} -eq ${MAX_ATTEMPTS} ]]; then
+      echo "  WARNING: Stale entries still present after 2 minutes. Phase 3 destroy may fail."
+    else
+      echo "  Still present, waiting 10s (attempt ${i}/${MAX_ATTEMPTS})..."
+      sleep 10
+    fi
+  done
+else
+  echo "  No stale SA entries found."
+fi
 
 # =============================================================================
 # Phase 3: BigQuery Loader (reverse layer order)

@@ -1,11 +1,14 @@
 # Phase 4 Monitoring — First Time Setup
 # Enable APIs, grant dashboard SA read access to BQ
 
-resource "google_project_service" "logging" {
-  project            = var.project_id
-  service            = "logging.googleapis.com"
-  disable_on_destroy = false
-}
+# logging.googleapis.com is always enabled by default and is a dependency for
+# Cloud Run, Cloud Build, Cloud Functions etc. No need for Phase 4 to manage it.
+# Removing avoids stale state issues on destroy (see learnings Issue 17).
+# resource "google_project_service" "logging" {
+#   project            = var.project_id
+#   service            = "logging.googleapis.com"
+#   disable_on_destroy = false
+# }
 
 # Dashboard SA needs to run queries and read the pipeline_logs dataset
 resource "google_project_iam_member" "dashboard_bq_job_user" {
@@ -25,20 +28,27 @@ resource "google_bigquery_dataset_iam_member" "dashboard_data_viewer" {
 # When Phase 4 is destroyed and recreated, the old SA gets a "deleted:" prefix
 # in existing dataset IAM bindings, which blocks new IAM grants.
 resource "null_resource" "cleanup_stale_sa_bindings" {
+  # Always run — stale entries may exist from a previous destroy/recreate cycle
   triggers = {
-    dashboard_sa_email = var.dashboard_sa_email
+    always_run = timestamp()
   }
 
   provisioner "local-exec" {
-    command = format(
-      "$stale = bq show --format=prettyjson '%s:github_archive' 2>$null | Select-String -Pattern '\"deleted:serviceAccount:%s' -SimpleMatch; if ($stale) { Write-Host 'Found stale SA binding, removing...'; $uid = ($stale -replace '.*uid=','') -replace '\".*',''; $member = 'deleted:serviceAccount:%s?uid=' + $uid; bq query --project_id=%s --nouse_legacy_sql ('REVOKE ``roles/bigquery.dataViewer`` ON SCHEMA ``%s.github_archive`` FROM \"' + $member + '\"'); Write-Host 'Stale SA binding removed.' } else { Write-Host 'No stale SA bindings found.' }",
-      var.project_id,
-      var.dashboard_sa_email,
-      var.dashboard_sa_email,
-      var.project_id,
-      var.project_id
-    )
-    interpreter = ["powershell", "-Command"]
+    command     = <<-SCRIPT
+      echo "Checking for stale SA bindings in github_archive dataset..."
+      STALE=$(bq show --format=prettyjson ${var.project_id}:github_archive 2>/dev/null | grep -o '"deleted:serviceAccount:${var.dashboard_sa_email}?uid=[0-9]*"' | head -1)
+      if [ -n "$STALE" ]; then
+        MEMBER=$(echo $STALE | tr -d '"')
+        echo "Found stale binding: $MEMBER"
+        echo "Removing..."
+        bq query --project_id=${var.project_id} --nouse_legacy_sql \
+          "REVOKE \`roles/bigquery.dataViewer\` ON SCHEMA \`${var.project_id}.github_archive\` FROM \"$MEMBER\""
+        echo "Stale SA binding removed."
+      else
+        echo "No stale SA bindings found."
+      fi
+    SCRIPT
+    interpreter = ["bash", "-c"]
   }
 }
 
@@ -66,12 +76,30 @@ resource "null_resource" "verify_dashboard_iam" {
   }
 
   provisioner "local-exec" {
-    command = format(
-      "$maxAttempts = 6; $attempt = 0; while ($attempt -lt $maxAttempts) { $attempt++; Write-Host \"Verifying dashboard SA IAM (attempt $attempt/$maxAttempts)...\"; $token = gcloud auth print-access-token --impersonate-service-account=%s 2>$null; if ($token) { try { $response = Invoke-RestMethod -Uri 'https://bigquery.googleapis.com/bigquery/v2/projects/%s/datasets/github_archive?fields=id' -Headers @{Authorization=\"Bearer $token\"} -ErrorAction Stop; Write-Host 'IAM verified: dashboard SA can access github_archive dataset.'; exit 0 } catch { Write-Host \"  Access not yet propagated: $($_.Exception.Message)\" } } else { Write-Host '  Could not impersonate SA, waiting...' }; Start-Sleep -Seconds 10 }; Write-Host 'WARNING: IAM verification timed out after 60s. Dashboard may need a few more minutes.'; exit 0",
-      var.dashboard_sa_email,
-      var.project_id
-    )
-    interpreter = ["powershell", "-Command"]
+    command     = <<-SCRIPT
+      MAX_ATTEMPTS=6
+      for i in $(seq 1 $MAX_ATTEMPTS); do
+        echo "Verifying dashboard SA IAM (attempt $i/$MAX_ATTEMPTS)..."
+        TOKEN=$(gcloud auth print-access-token --impersonate-service-account=${var.dashboard_sa_email} 2>/dev/null)
+        if [ -n "$TOKEN" ]; then
+          STATUS=$(curl -s -o /dev/null -w "%%{http_code}" \
+            -H "Authorization: Bearer $TOKEN" \
+            "https://bigquery.googleapis.com/bigquery/v2/projects/${var.project_id}/datasets/github_archive?fields=id")
+          if [ "$STATUS" = "200" ]; then
+            echo "IAM verified: dashboard SA can access github_archive dataset."
+            exit 0
+          else
+            echo "  Access not yet propagated (HTTP $STATUS)"
+          fi
+        else
+          echo "  Could not impersonate SA, waiting..."
+        fi
+        sleep 10
+      done
+      echo "WARNING: IAM verification timed out after 60s. Dashboard may need a few more minutes."
+      exit 0
+    SCRIPT
+    interpreter = ["bash", "-c"]
   }
 }
 

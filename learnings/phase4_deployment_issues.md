@@ -153,6 +153,25 @@ FROM "deleted:serviceAccount:SA_EMAIL?uid=OLD_UID"
 RUN pip install --no-cache-dir --root-user-action=ignore -r requirements.txt
 ```
 
+## Issue 17: Stale terraform state after multi-layer destroy
+
+**Problem**: After running destroy across all 3 layers (03 → 02 → 01), Layer 02 had a stale `google_project_service.logging` entry left in state. The destroy appeared to succeed but the state wasn't fully clean. This happened because `disable_on_destroy = false` means terraform doesn't actually call the GCP API — it just needs to remove the state entry, which sometimes requires a second pass.
+
+**Impact of stale state**:
+- Next `terraform apply` will try to refresh resources that no longer exist, causing confusing errors
+- Terraform believes it manages resources it doesn't (state drift)
+- If resources are recreated manually or by another layer, terraform can't import them because the old entry conflicts
+
+**Fix**: After destroy, always verify state is empty:
+```bash
+terraform -chdir="path/to/layer" state list
+```
+If entries remain, either:
+- Run `terraform destroy` again (it will clean up the state)
+- Manually remove with `terraform state rm <resource_address>`
+
+**Prevention**: Consider adding a post-destroy verification step to destroy scripts that checks all layers have empty state.
+
 ## Deployment Order
 
 Phase 4 requires this sequence:

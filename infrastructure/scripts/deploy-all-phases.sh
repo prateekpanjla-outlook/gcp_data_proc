@@ -2,7 +2,7 @@
 # Deploy All Phases of GitHub Archive Pipeline
 # Usage: ./deploy-all-phases.sh <PROJECT_ID> <ENVIRONMENT> [REGION]
 #
-# Deploys Phase 1 -> Phase 2 -> Phase 3 (Layer 01 -> 02 -> 03) in sequence.
+# Deploys Phase 1 -> Phase 2 -> Phase 3 -> Phase 4 (Layer 01 -> 02 -> 03) in sequence.
 # Each phase depends on outputs from the previous phase.
 #
 # Example:
@@ -151,10 +151,57 @@ tf_apply "${PHASE3_BASE}/03_operational" \
   -var="staging_bucket_name=${STAGING_BUCKET}"
 
 # =============================================================================
+# Phase 4: Monitoring Dashboard (3 layers)
+# =============================================================================
+echo ""
+echo "========================================="
+echo "Phase 4: Monitoring Dashboard"
+echo "========================================="
+PHASE4_BASE="${BASE}/phase4_monitoring/terraform/layers"
+DASHBOARD_SA="${ENVIRONMENT}-pipeline-dashboard@${PROJECT_ID}.iam.gserviceaccount.com"
+PIPELINE_LOGS_DATASET="${ENVIRONMENT}_pipeline_logs"
+
+# Layer 01: Static
+echo ""
+echo "--- Layer 01: Static ---"
+tf_apply "${PHASE4_BASE}/01_static" \
+  -var="project_id=${PROJECT_ID}" \
+  -var="environment=${ENVIRONMENT}"
+
+# Layer 02: First-time (includes stale SA cleanup + IAM verification)
+echo ""
+echo "--- Layer 02: First-time ---"
+terraform -chdir="${PHASE4_BASE}/02_first_time" init -upgrade -input=false -no-color
+echo "  terraform apply..."
+terraform -chdir="${PHASE4_BASE}/02_first_time" apply -auto-approve -input=false \
+  -var="project_id=${PROJECT_ID}" \
+  -var="environment=${ENVIRONMENT}" \
+  -var="dashboard_sa_email=${DASHBOARD_SA}" \
+  -var="pipeline_logs_dataset_id=${PIPELINE_LOGS_DATASET}"
+
+# Layer 03: Operational (includes Cloud Build + Cloud Run)
+echo ""
+echo "--- Layer 03: Operational ---"
+terraform -chdir="${PHASE4_BASE}/03_operational" init -upgrade -input=false -no-color
+echo "  terraform apply..."
+terraform -chdir="${PHASE4_BASE}/03_operational" apply -auto-approve -input=false \
+  -var="project_id=${PROJECT_ID}" \
+  -var="environment=${ENVIRONMENT}" \
+  -var="dashboard_sa_email=${DASHBOARD_SA}" \
+  -var="pipeline_logs_dataset_id=${PIPELINE_LOGS_DATASET}" \
+  -var="artifact_registry_repo=${ENVIRONMENT}-github-archive" \
+  -var="deployer_sa_key_path=${KEY_PATH}"
+
+echo ""
+echo "  Phase 4 complete."
+
+# =============================================================================
 # Summary
 # =============================================================================
 DEPLOY_END=$(date +%s)
 DEPLOY_DURATION=$((DEPLOY_END - DEPLOY_START))
+
+DASHBOARD_URL=$(terraform -chdir="${PHASE4_BASE}/03_operational" output -raw dashboard_url 2>/dev/null || echo "N/A")
 
 echo ""
 echo "========================================="
@@ -164,6 +211,7 @@ echo "Duration:       ${DEPLOY_DURATION}s"
 echo "Landing Bucket: ${LANDING_BUCKET}"
 echo "Staging Bucket: ${STAGING_BUCKET}"
 echo "BQ Dataset:     ${PROJECT_ID}:github_archive.github_events"
+echo "Dashboard:      ${DASHBOARD_URL}"
 echo "Log:            ${LOG_FILE}"
 echo "Finished:       $(date)"
 echo "========================================="

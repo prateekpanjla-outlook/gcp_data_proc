@@ -64,6 +64,18 @@ def phase3_detail():
     return render_template('phase3.html', loads=loads)
 
 
+@app.route('/infra')
+def infrastructure():
+    """Terraform infrastructure overview."""
+    return render_template('infrastructure.html')
+
+
+@app.route('/service-accounts')
+def service_accounts():
+    """Service account dependencies."""
+    return render_template('service_accounts.html')
+
+
 @app.route('/health')
 def health():
     return {'status': 'healthy'}, 200
