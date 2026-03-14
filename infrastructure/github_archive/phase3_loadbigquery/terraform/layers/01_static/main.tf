@@ -38,6 +38,13 @@ resource "google_project_service" "cloudfunctions" {
   disable_on_destroy = false
 }
 
+resource "google_project_service" "bigquery_datatransfer" {
+  project = var.project_id
+  service = "bigquerydatatransfer.googleapis.com"
+
+  disable_on_destroy = false
+}
+
 # =============================================================================
 # BigQuery Dataset
 # =============================================================================
