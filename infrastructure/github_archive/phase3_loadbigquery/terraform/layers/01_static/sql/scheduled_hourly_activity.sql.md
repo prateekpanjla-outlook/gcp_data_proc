@@ -20,7 +20,13 @@ SQL template for the BigQuery scheduled query that produces hourly activity summ
 | Downstream | `hourly_activity_summary` table | Destination table where aggregated rows are appended |
 | Downstream | BI/dashboards | Consumers can query `hourly_activity_summary` for time-series activity trends |
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+- **Runtime SA**: This SQL runs as `{env}-bq-loader@{project}.iam.gserviceaccount.com` via a BigQuery Data Transfer scheduled query.
+- **Required role**: `bigquery.admin` (not just `bigquery.dataEditor`), because BigQuery Data Transfer requires dataset-level admin permissions to execute scheduled queries and write results.
+- **API dependency**: The `bigquerydatatransfer.googleapis.com` API must be enabled on the project for scheduled queries to function.
+
+## 5. Code Walkthrough
 
 1. **Time truncation (line 6):** `TIMESTAMP_TRUNC(created_at, HOUR) AS hour` buckets events into hourly windows.
 

@@ -18,7 +18,21 @@
 - `app.py` route `/phase2` -- calls `_run_query('phase2_processing_summary')` and passes the result as `files` to `phase2.html`.
 - `templates/phase2.html` -- renders a table with columns: `processing_date`, `file_name`, `records_in`, `records_out`, `errors`, `duration_seconds`, `timestamp_ist`.
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+These queries are executed by the Flask dashboard app running as `{env}-pipeline-dashboard@{project}.iam.gserviceaccount.com`.
+
+| Role | Purpose |
+|---|---|
+| `bigquery.jobUser` | Run BigQuery queries (create jobs) |
+| `bigquery.dataViewer` | Read tables in the `pipeline_logs` dataset |
+
+### Cross-references
+
+- **Learnings Issue 10** (`phase4_deployment_issues.md`): The dashboard SA initially lacked `bigquery.resourceViewer`, which is needed for `INFORMATION_SCHEMA.JOBS` access (relevant to `phase3_bq_load_summary.sql`, not this query).
+- **Learnings Issue 11** (`phase4_deployment_issues.md`): The dashboard SA initially only had `dataViewer` on `pipeline_logs`, not on `github_archive`. This caused silent failures -- `_run_query()` catches exceptions and returns empty results, so missing permissions surface as empty tables rather than errors.
+
+## 5. Code Walkthrough
 
 1. **SELECT clause**: Buckets by IST date. Uses `REGEXP_EXTRACT` to parse the file name (text between `Completed ` and `:`), records in, records out, errors, and duration from `textPayload`. Casts numeric extractions to `INT64` (counts) and `FLOAT64` (duration).
 

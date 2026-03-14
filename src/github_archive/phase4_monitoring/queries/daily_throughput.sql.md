@@ -18,7 +18,21 @@
 - `app.py` route `/` (`dashboard`) -- calls `_run_query('daily_throughput')` and passes the result as `daily` to `dashboard.html`.
 - `templates/dashboard.html` -- renders the "Daily Throughput" table using columns: `day`, `files_processed`, `total_records_in`, `total_records_out`, `total_errors`, `error_rate_pct`, `avg_duration_s`.
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+These queries are executed by the Flask dashboard app running as `{env}-pipeline-dashboard@{project}.iam.gserviceaccount.com`.
+
+| Role | Purpose |
+|---|---|
+| `bigquery.jobUser` | Run BigQuery queries (create jobs) |
+| `bigquery.dataViewer` | Read tables in the `pipeline_logs` dataset |
+
+### Cross-references
+
+- **Learnings Issue 10** (`phase4_deployment_issues.md`): The dashboard SA initially lacked `bigquery.resourceViewer`, which is needed for `INFORMATION_SCHEMA.JOBS` access (relevant to `phase3_bq_load_summary.sql`, not this query).
+- **Learnings Issue 11** (`phase4_deployment_issues.md`): The dashboard SA initially only had `dataViewer` on `pipeline_logs`, not on `github_archive`. This caused silent failures -- `_run_query()` catches exceptions and returns empty results, so missing permissions surface as empty tables rather than errors.
+
+## 5. Code Walkthrough
 
 1. **SELECT clause**: Uses `DATE(timestamp, 'Asia/Kolkata')` to bucket rows by IST date. Applies `REGEXP_EXTRACT` with capture groups to parse numeric values from the unstructured `textPayload` field: records in (`(\d+) in,`), records out (`(\d+) out,`), errors (`(\d+) errors,`), and duration (`([\d.]+)s$`).
 

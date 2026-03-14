@@ -29,7 +29,37 @@ Artifact Registry / Container Registry  (built image is pushed here)
 - **Upstream**: The only local dependency is `download.sh`. The base image (`google-cloud-cli:slim`) supplies `gcloud`, `gsutil`, `curl`, and a minimal Debian environment.
 - **Downstream**: The built image is pushed to Artifact Registry (or Container Registry) and referenced by the Cloud Run Job definition. Cloud Scheduler triggers the job every hour.
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+This Docker image is built by **Cloud Build** using the custom service account `{env}-cloud-build@{project}.iam.gserviceaccount.com`.
+
+### Default SA vs Custom SA
+
+| | Default SA | Custom SA |
+|---|---|---|
+| **Identity** | `{project_number}@cloudbuild.gserviceaccount.com` | `{env}-cloud-build@{project}.iam.gserviceaccount.com` |
+| **Created by** | GCP automatically | Us, in Phase 1 Terraform |
+| **Permissions** | Broad (editor-level) | Least-privilege, only the roles listed below |
+| **Used when** | No `--service-account` flag passed to `gcloud builds submit` | Explicitly passed via `--service-account` flag |
+
+We use the custom SA as a security best practice: the default SA is over-permissioned, violating the principle of least privilege. A custom SA limits blast radius if credentials are compromised.
+
+### Roles required by the Cloud Build SA
+
+| Role | Purpose |
+|---|---|
+| `cloudbuild.builds.builder` | Core Cloud Build permissions (read source, write logs, push images) |
+| `run.admin` | Deploy Cloud Run services and jobs |
+| `cloudfunctions.developer` | Deploy Cloud Functions (Phase 3) |
+| `iam.serviceAccountUser` | Act as other SAs (e.g., the Cloud Run runtime SA) |
+| `logging.logWriter` | Write build logs to Cloud Logging |
+
+### Cross-references
+
+- **Learnings Issue 3** (`phase4_deployment_issues.md`): When using a custom Cloud Build SA, the flag `--default-buckets-behavior=REGIONAL_USER_OWNED_BUCKET` is required on `gcloud builds submit`. Without it, Cloud Build fails because the custom SA cannot access the default logs bucket.
+- **Learnings Issue 5** (`github_actions_ci_issues.md`): On GitHub Actions runners, `gcloud beta` commands need the `--quiet` flag to auto-install the beta component without an interactive prompt.
+
+## 5. Code Walkthrough
 
 1. **Base image** (line 3): Uses `gcr.io/google.com/cloudsdktool/google-cloud-cli:slim`, the slim variant of Google's Cloud SDK image. This provides `gcloud`, `gsutil`, and `curl` out of the box while keeping the image size small (no full SDK extras).
 

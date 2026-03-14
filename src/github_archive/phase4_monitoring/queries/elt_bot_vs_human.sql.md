@@ -17,7 +17,21 @@
 - `app.py` route `/elt` -- calls `_run_query('elt_bot_vs_human')` and passes the result as `bot_human` to `elt.html`.
 - `templates/elt.html` -- renders the "Bot vs Human Activity" table with columns: `day`, `actor_type`, `event_count`, `unique_actors`, `unique_repos`, `pushes`, `prs`.
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+These queries are executed by the Flask dashboard app running as `{env}-pipeline-dashboard@{project}.iam.gserviceaccount.com`.
+
+| Role | Purpose |
+|---|---|
+| `bigquery.jobUser` | Run BigQuery queries (create jobs) |
+| `bigquery.dataViewer` | Read tables/views in the `github_archive` dataset |
+
+### Cross-references
+
+- **Learnings Issue 10** (`phase4_deployment_issues.md`): The dashboard SA initially lacked `bigquery.resourceViewer`, which is needed for `INFORMATION_SCHEMA.JOBS` access (relevant to `phase3_bq_load_summary.sql`, not this query).
+- **Learnings Issue 11** (`phase4_deployment_issues.md`): The dashboard SA initially only had `dataViewer` on `pipeline_logs`, not on `github_archive`. This caused silent failures -- `_run_query()` catches exceptions and returns empty results, so missing permissions surface as empty tables rather than errors.
+
+## 5. Code Walkthrough
 
 1. **SELECT clause**: Reads all pre-computed columns from the mart view: `day`, `actor_type`, `event_count`, `unique_actors`, `unique_repos`, `pushes`, `prs`. No additional transformation is performed.
 

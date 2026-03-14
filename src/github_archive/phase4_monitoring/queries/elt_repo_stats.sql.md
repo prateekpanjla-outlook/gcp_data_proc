@@ -17,7 +17,23 @@
 - `app.py` route `/elt` -- calls `_run_query('elt_repo_stats')` and passes the result as `repos` to `elt.html`.
 - `templates/elt.html` -- renders the "Top Repositories" table with columns: `day`, `repo_name`, `total_events`, `pushes`, `issues`, `pull_requests`, `stars`, `forks`, `unique_contributors`.
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+These queries are executed by the Flask dashboard app running as `{env}-pipeline-dashboard@{project}.iam.gserviceaccount.com`.
+
+| Role | Purpose |
+|---|---|
+| `bigquery.jobUser` | Run BigQuery queries (create jobs) |
+| `bigquery.dataViewer` | Read tables/views in the `github_archive` dataset |
+
+This query reads from the `mv_repo_daily_stats` materialized view in the `github_archive` dataset. The `dataViewer` role on `github_archive` covers access to materialized views in the same dataset -- no additional role is needed.
+
+### Cross-references
+
+- **Learnings Issue 10** (`phase4_deployment_issues.md`): The dashboard SA initially lacked `bigquery.resourceViewer`, which is needed for `INFORMATION_SCHEMA.JOBS` access (relevant to `phase3_bq_load_summary.sql`, not this query).
+- **Learnings Issue 11** (`phase4_deployment_issues.md`): The dashboard SA initially only had `dataViewer` on `pipeline_logs`, not on `github_archive`. This caused silent failures -- `_run_query()` catches exceptions and returns empty results, so missing permissions surface as empty tables rather than errors. The `github_archive` `dataViewer` grant was added to Terraform Layer 02.
+
+## 5. Code Walkthrough
 
 1. **SELECT clause**: Reads all pre-computed columns directly from the materialized view: `day`, `repo_name`, `total_events`, `pushes`, `issues`, `pull_requests`, `stars`, `forks`, `unique_contributors`. No transformation is needed since the MV already aggregates the data.
 

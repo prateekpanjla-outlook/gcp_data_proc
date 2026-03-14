@@ -17,7 +17,21 @@
 - `app.py` route `/` (`dashboard`) -- calls `_run_query('pipeline_errors')` and passes the result as `errors` to `dashboard.html`.
 - `templates/dashboard.html` -- renders the "Recent Errors" table using columns: `timestamp_ist`, `phase`, `severity`, `error_message`.
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+These queries are executed by the Flask dashboard app running as `{env}-pipeline-dashboard@{project}.iam.gserviceaccount.com`.
+
+| Role | Purpose |
+|---|---|
+| `bigquery.jobUser` | Run BigQuery queries (create jobs) |
+| `bigquery.dataViewer` | Read tables in the `pipeline_logs` dataset |
+
+### Cross-references
+
+- **Learnings Issue 10** (`phase4_deployment_issues.md`): The dashboard SA initially lacked `bigquery.resourceViewer`, which is needed for `INFORMATION_SCHEMA.JOBS` access (relevant to `phase3_bq_load_summary.sql`, not this query).
+- **Learnings Issue 11** (`phase4_deployment_issues.md`): The dashboard SA initially only had `dataViewer` on `pipeline_logs`, not on `github_archive`. This caused silent failures -- `_run_query()` catches exceptions and returns empty results, so missing permissions surface as empty tables rather than errors.
+
+## 5. Code Walkthrough
 
 1. **SELECT clause**: Converts `timestamp` to IST using `DATETIME(timestamp, 'Asia/Kolkata')`. Uses a `CASE` statement on `resource.type` to map `cloud_run_job` to `phase1_ingestion`, `cloud_run_revision` to `phase2_processing`, and `cloud_function` to `phase3_bq_load`.
 

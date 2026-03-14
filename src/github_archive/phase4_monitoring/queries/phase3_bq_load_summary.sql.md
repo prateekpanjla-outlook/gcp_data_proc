@@ -19,7 +19,24 @@
 - `app.py` route `/phase3` -- calls `_run_query('phase3_bq_load_summary')` and passes the result as `loads` to `phase3.html`.
 - `templates/phase3.html` -- renders a table with columns: `load_date`, `job_type`, `job_id`, `rows_loaded`, `status`, `timestamp_ist`.
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+These queries are executed by the Flask dashboard app running as `{env}-pipeline-dashboard@{project}.iam.gserviceaccount.com`.
+
+| Role | Purpose |
+|---|---|
+| `bigquery.jobUser` | Run BigQuery queries (create jobs) |
+| `bigquery.dataViewer` | Read tables in the `pipeline_logs` and `github_archive` datasets |
+| `bigquery.resourceViewer` | Access `INFORMATION_SCHEMA.JOBS` (requires `bigquery.jobs.list` permission) |
+
+This query is the reason `bigquery.resourceViewer` was added to the dashboard SA -- it queries `region-us-central1.INFORMATION_SCHEMA.JOBS` for BQ load job metadata, which requires project-level job listing permission beyond what `dataViewer` provides.
+
+### Cross-references
+
+- **Learnings Issue 10** (`phase4_deployment_issues.md`): The dashboard SA initially lacked `bigquery.resourceViewer`. Querying `INFORMATION_SCHEMA.JOBS` failed until this role was granted at project level and added to Terraform Layer 02.
+- **Learnings Issue 11** (`phase4_deployment_issues.md`): This query joins `INFORMATION_SCHEMA.JOBS` with `github_archive.github_events` for row counts. The dashboard SA initially only had `dataViewer` on `pipeline_logs`, not on `github_archive`. This caused silent failures -- `_run_query()` catches exceptions and returns empty results, so missing permissions surface as empty tables rather than errors.
+
+## 5. Code Walkthrough
 
 1. **Main SELECT**: Extracts the IST load date, job type, job ID, and a computed `status` column. The status uses a `CASE` expression: if the job state is `DONE`, it checks `error_result` -- `NULL` means success, non-NULL means failed. Other states (e.g., `RUNNING`, `PENDING`) are passed through as-is.
 

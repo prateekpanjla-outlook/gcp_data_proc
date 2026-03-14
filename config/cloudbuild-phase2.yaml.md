@@ -21,7 +21,17 @@ Cloud Build configuration for Phase 2 (Process Files) of the GitHub Archive pipe
 - Phase 2 Terraform references the built image (`processor:latest`) when creating the Cloud Run service.
 - `deploy-all-phases.sh` triggers this build via Terraform during Phase 2 deployment.
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+- **Build SA**: Runs as `{env}-cloud-build@{project}.iam.gserviceaccount.com` (custom SA, not the default Cloud Build SA). The custom SA is passed via the `--service-account` flag in the Terraform `null_resource` or `gcloud builds submit` command.
+- **Roles required on the custom SA**:
+  - `cloudbuild.builds.builder` — build and push images to Artifact Registry.
+  - `run.admin` — deploy Cloud Run services/jobs.
+  - `iam.serviceAccountUser` — attach runtime SAs to Cloud Run services/jobs.
+- **Non-obvious**: The custom Cloud Build SA cannot write logs to the default `_cloudbuild` bucket. The build must specify either `--default-buckets-behavior=REGIONAL_USER_OWNED_BUCKET` or an explicit `--logs-bucket` (see learnings Issue 3).
+- **Cross-reference**: Issue 5 in `github_actions_ci_issues.md` — `gcloud beta` commands need `--quiet` on non-interactive runners.
+
+## 5. Code Walkthrough
 
 1. **Substitutions** (lines 10-12): Declares default values for `_REGION` and `_ENV`.
 2. **Build step** (lines 15-27): Uses `gcr.io/cloud-builders/docker` to build the image with two tags:

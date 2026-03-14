@@ -25,7 +25,15 @@ GitHub Actions workflow for manually destroying the GitHub Archive pipeline infr
 - After this workflow completes, the selected environment's GCP resources are fully removed.
 - The post-destroy verification step writes remaining resource counts to `$GITHUB_STEP_SUMMARY`.
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+- **Deployer SA**: Uses the same Terraform deployer SA as the deploy workflow, decoded from the `GCP_SA_KEY_BASE64` GitHub secret.
+- **Key roles on the deployer SA**:
+  - `roles/logging.admin` — required for log sink create/delete operations during destroy (see learnings Issue 4 in `phase4_deployment_issues.md`).
+  - `roles/storage.admin` — required for Terraform state access on the GCS state bucket.
+- **Cross-reference**: Issue 7 in `github_actions_ci_issues.md` — without remote state in GCS, `terraform destroy` from CI is impossible because ephemeral runners lose local state between runs.
+
+## 5. Code Walkthrough
 
 1. **Trigger** (lines 3-18): `workflow_dispatch` with two inputs:
    - `environment`: Choice of `test`, `dev`, or `prod` (default `test`).
