@@ -12,13 +12,28 @@ resource "null_resource" "wait_for_iam_propagation" {
   }
 
   provisioner "local-exec" {
-    command = format(
-      "$sa = '%s'; $bucket = '%s_cloudbuild'; $project = '%s'; $maxAttempts = 12; $attempt = 0; while ($attempt -lt $maxAttempts) { $attempt++; Write-Host \"Checking IAM propagation (attempt $attempt/$maxAttempts)...\"; $token = gcloud auth print-access-token --impersonate-service-account=$sa 2>$null; if ($token) { $response = Invoke-RestMethod -Uri \"https://storage.googleapis.com/storage/v1/b/$bucket/iam/testPermissions?permissions=storage.objects.get&permissions=storage.objects.create\" -Headers @{Authorization=\"Bearer $token\"} -ErrorAction SilentlyContinue; if ($response.permissions -contains 'storage.objects.get') { Write-Host 'IAM permissions confirmed.'; exit 0 } }; Write-Host '  Not yet propagated, waiting 10s...'; Start-Sleep -Seconds 10 }; Write-Host 'ERROR: IAM propagation timed out after 120s'; exit 1",
-      google_service_account.cloudbuild_sa.email,
-      var.project_id,
-      var.project_id
-    )
-    interpreter = ["powershell", "-Command"]
+    command     = <<-SCRIPT
+      SA="${google_service_account.cloudbuild_sa.email}"
+      BUCKET="${var.project_id}_cloudbuild"
+      MAX_ATTEMPTS=12
+      for i in $(seq 1 $MAX_ATTEMPTS); do
+        echo "Checking IAM propagation (attempt $i/$MAX_ATTEMPTS)..."
+        TOKEN=$(gcloud auth print-access-token --impersonate-service-account="$SA" 2>/dev/null)
+        if [ -n "$TOKEN" ]; then
+          RESPONSE=$(curl -s -H "Authorization: Bearer $TOKEN" \
+            "https://storage.googleapis.com/storage/v1/b/$BUCKET/iam/testPermissions?permissions=storage.objects.get&permissions=storage.objects.create")
+          if echo "$RESPONSE" | grep -q "storage.objects.get"; then
+            echo "IAM permissions confirmed."
+            exit 0
+          fi
+        fi
+        echo "  Not yet propagated, waiting 10s..."
+        sleep 10
+      done
+      echo "ERROR: IAM propagation timed out after 120s"
+      exit 1
+    SCRIPT
+    interpreter = ["bash", "-c"]
   }
 }
 
@@ -39,16 +54,14 @@ resource "null_resource" "build_downloader_image" {
   }
 
   provisioner "local-exec" {
-    command = format(
-      "gcloud auth activate-service-account --key-file=%s; if ($LASTEXITCODE -ne 0) { exit 1 }; gcloud builds submit %s --config %s --project=%s --substitutions='_REGION=%s,_ENV=%s' --service-account=%s",
-      var.deployer_sa_key_path,
-      "${path.module}/../../../../src/github_archive",
-      "${path.module}/../../../../config/cloudbuild-phase1.yaml",
-      var.project_id,
-      var.region,
-      var.environment,
-      google_service_account.cloudbuild_sa.name
-    )
-    interpreter = ["powershell", "-Command"]
+    command     = <<-SCRIPT
+      gcloud auth activate-service-account --key-file=${var.deployer_sa_key_path} || exit 1
+      gcloud builds submit ${path.module}/../../../../src/github_archive \
+        --config ${path.module}/../../../../config/cloudbuild-phase1.yaml \
+        --project=${var.project_id} \
+        --substitutions='_REGION=${var.region},_ENV=${var.environment}' \
+        --service-account=${google_service_account.cloudbuild_sa.name}
+    SCRIPT
+    interpreter = ["bash", "-c"]
   }
 }

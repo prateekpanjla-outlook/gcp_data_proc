@@ -39,13 +39,11 @@ resource "null_resource" "init_service_agents" {
   ]
 
   provisioner "local-exec" {
-    command = format(
-      "gcloud auth activate-service-account --key-file=%s; gcloud beta services identity create --service=storage.googleapis.com --project=%s; gcloud beta services identity create --service=eventarc.googleapis.com --project=%s",
-      var.deployer_sa_key_path,
-      var.project_id,
-      var.project_id
-    )
-
-    interpreter = ["powershell", "-Command"]
+    command     = <<-SCRIPT
+      gcloud auth activate-service-account --key-file=${var.deployer_sa_key_path} || exit 1
+      gcloud beta services identity create --service=storage.googleapis.com --project=${var.project_id}
+      gcloud beta services identity create --service=eventarc.googleapis.com --project=${var.project_id}
+    SCRIPT
+    interpreter = ["bash", "-c"]
   }
 }
