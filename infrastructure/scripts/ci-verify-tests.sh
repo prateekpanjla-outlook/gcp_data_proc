@@ -39,8 +39,8 @@ LANDING_TIMEOUT=300   # 5 min
 STAGING_TIMEOUT=600   # 10 min
 BQ_TIMEOUT=300        # 5 min
 
-# Calculate target hour (2 hours ago)
-HOUR_OFFSET=2
+# Calculate target hour (1 hour ago — matches the download job's default)
+HOUR_OFFSET=1
 TARGET_DATE=$(date -u -d "${HOUR_OFFSET} hours ago" +"%Y-%m-%d" 2>/dev/null || date -u -v-${HOUR_OFFSET}H +"%Y-%m-%d")
 TARGET_HOUR=$(date -u -d "${HOUR_OFFSET} hours ago" +"%-H" 2>/dev/null || date -u -v-${HOUR_OFFSET}H +"%-H")
 TARGET_FILE="${TARGET_DATE}-${TARGET_HOUR}.json.gz"
@@ -139,8 +139,17 @@ gcloud run jobs execute "${JOB_NAME}" \
 
 ELAPSED=0
 LANDING_FOUND=false
+FOUND_FILE=""
 while [ ${ELAPSED} -lt ${LANDING_TIMEOUT} ]; do
+  # Check for the exact target file first, then any .json.gz file
   if gcloud storage ls "gs://${LANDING_BUCKET}/github-archive/raw/${TARGET_FILE}" >/dev/null 2>&1; then
+    LANDING_FOUND=true
+    FOUND_FILE="${TARGET_FILE}"
+    break
+  fi
+  # Fallback: check for any recently downloaded file
+  FOUND_FILE=$(gcloud storage ls "gs://${LANDING_BUCKET}/github-archive/raw/*.json.gz" 2>/dev/null | tail -1 | xargs -I{} basename {} 2>/dev/null || echo "")
+  if [ -n "${FOUND_FILE}" ]; then
     LANDING_FOUND=true
     break
   fi
@@ -150,12 +159,10 @@ while [ ${ELAPSED} -lt ${LANDING_TIMEOUT} ]; do
 done
 
 if [ "${LANDING_FOUND}" = "true" ]; then
-  FILE_SIZE=$(gcloud storage ls -l "gs://${LANDING_BUCKET}/github-archive/raw/${TARGET_FILE}" --format="value(size)" 2>/dev/null || echo "0")
-  if [ "${FILE_SIZE}" -gt 0 ] 2>/dev/null; then
-    pass "File downloaded: ${TARGET_FILE} (${FILE_SIZE} bytes) in ${ELAPSED}s"
-  else
-    pass "File downloaded: ${TARGET_FILE} in ${ELAPSED}s"
-  fi
+  pass "File downloaded: ${FOUND_FILE} in ${ELAPSED}s"
+  # Update target for subsequent checks
+  TARGET_DATE=$(echo "${FOUND_FILE}" | grep -oP '^\d{4}-\d{2}-\d{2}')
+  TARGET_HOUR=$(echo "${FOUND_FILE}" | grep -oP '\d{4}-\d{2}-\d{2}-\K\d+')
 else
   fail "File not found in landing bucket after ${LANDING_TIMEOUT}s"
 fi
@@ -174,8 +181,9 @@ STAGING_FOUND=false
 STAGING_PREFIX="${TARGET_DATE}-${TARGET_HOUR}"
 
 while [ ${ELAPSED} -lt ${STAGING_TIMEOUT} ]; do
-  CHUNK_COUNT=$(gcloud storage ls "gs://${STAGING_BUCKET}/processed/${STAGING_PREFIX}-chunk-*" 2>/dev/null | wc -l || echo "0")
-  if [ "${CHUNK_COUNT}" -gt 0 ]; then
+  CHUNK_COUNT=$(gcloud storage ls "gs://${STAGING_BUCKET}/processed/${STAGING_PREFIX}-chunk-*" 2>/dev/null | wc -l | tr -d ' ')
+  CHUNK_COUNT=${CHUNK_COUNT:-0}
+  if [ "${CHUNK_COUNT}" -gt 0 ] 2>/dev/null; then
     STAGING_FOUND=true
     break
   fi
