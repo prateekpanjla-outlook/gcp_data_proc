@@ -28,6 +28,9 @@ KEY_PATH="${REPO_ROOT}/infrastructure/${ENVIRONMENT}-terraform-deployer-key.json
 if [[ ! -f "${KEY_PATH}" ]]; then
   KEY_PATH="${REPO_ROOT}/infrastructure/test-terraform-deployer-key.json"
 fi
+if [[ ! -f "${KEY_PATH}" && -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]]; then
+  KEY_PATH="${GOOGLE_APPLICATION_CREDENTIALS}"
+fi
 
 # =============================================================================
 # Logging
