@@ -7,10 +7,10 @@ terraform {
     }
   }
 
-  # backend "gcs" {
-  #   bucket         = "REPLACE_WITH_TERRAFORM_STATE_BUCKET"
-  #   prefix         = "terraform/state/phase3-static"
-  # }
+  backend "gcs" {
+    bucket = "beaming-glyph-489707-b8-terraform-state"
+    prefix = "terraform/state/phase3-static"
+  }
   # Using local backend for development
 }
 

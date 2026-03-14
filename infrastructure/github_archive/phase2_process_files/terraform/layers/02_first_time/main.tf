@@ -11,10 +11,10 @@ terraform {
     }
   }
 
-  # backend "gcs" {
-  #   bucket         = "REPLACE_WITH_TERRAFORM_STATE_BUCKET"
-  #   prefix         = "terraform/state/phase2-first-time"
-  # }
+  backend "gcs" {
+    bucket = "beaming-glyph-489707-b8-terraform-state"
+    prefix = "terraform/state/phase2-first-time"
+  }
   # Using local backend for development
 }
 

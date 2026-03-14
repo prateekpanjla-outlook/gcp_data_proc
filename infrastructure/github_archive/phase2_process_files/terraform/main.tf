@@ -9,6 +9,11 @@ terraform {
       version = "~> 5.0"
     }
   }
+
+  backend "gcs" {
+    bucket = "beaming-glyph-489707-b8-terraform-state"
+    prefix = "terraform/state/phase2"
+  }
 }
 
 provider "google" {

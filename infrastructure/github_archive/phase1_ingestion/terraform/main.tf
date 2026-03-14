@@ -16,10 +16,10 @@ terraform {
   }
 
   # Backend for state management (configure per environment)
-  # backend "gcs" {
-  #   bucket = "YOUR_TERRAFORM_STATE_BUCKET"
-  #   prefix = "terraform/state/phase1-ingestion"
-  # }
+  backend "gcs" {
+    bucket = "beaming-glyph-489707-b8-terraform-state"
+    prefix = "terraform/state/phase1-ingestion"
+  }
 }
 
 # Provider configuration
