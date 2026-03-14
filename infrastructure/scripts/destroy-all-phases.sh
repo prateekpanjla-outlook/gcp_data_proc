@@ -150,34 +150,44 @@ done
 # =============================================================================
 echo ""
 echo "--- Cleaning stale SA entries from github_archive dataset ---"
-STALE_ENTRIES=$(bq show --format=prettyjson "${PROJECT_ID}:github_archive" 2>/dev/null | grep -o '"deleted:serviceAccount:[^"]*"' || true)
-if [[ -n "${STALE_ENTRIES}" ]]; then
-  for entry in ${STALE_ENTRIES}; do
-    MEMBER=$(echo "${entry}" | tr -d '"')
-    echo "  Revoking stale entry: ${MEMBER}"
-    bq query --project_id="${PROJECT_ID}" --nouse_legacy_sql \
-      "REVOKE \`roles/bigquery.dataViewer\` ON SCHEMA \`${PROJECT_ID}.github_archive\` FROM \"${MEMBER}\"" 2>/dev/null || true
-  done
+echo "  Waiting 30s for IAM propagation after Phase 4 SA deletion..."
+sleep 30
 
-  # Verify stale entries are removed (poll up to 2 minutes)
-  echo "  Verifying stale entries are removed..."
-  MAX_ATTEMPTS=12
-  for i in $(seq 1 ${MAX_ATTEMPTS}); do
+# Poll for stale entries and clean them (up to 2 minutes)
+MAX_ATTEMPTS=12
+CLEANED=false
+for i in $(seq 1 ${MAX_ATTEMPTS}); do
+  STALE_ENTRIES=$(bq show --format=prettyjson "${PROJECT_ID}:github_archive" 2>/dev/null | grep -o '"deleted:serviceAccount:[^"]*"' || true)
+  if [[ -n "${STALE_ENTRIES}" ]]; then
+    for entry in ${STALE_ENTRIES}; do
+      MEMBER=$(echo "${entry}" | tr -d '"')
+      echo "  Revoking stale entry: ${MEMBER}"
+      bq query --project_id="${PROJECT_ID}" --nouse_legacy_sql \
+        "REVOKE \`roles/bigquery.dataViewer\` ON SCHEMA \`${PROJECT_ID}.github_archive\` FROM \"${MEMBER}\"" 2>/dev/null || true
+    done
+    CLEANED=true
+    # Verify removal
+    sleep 5
     REMAINING=$(bq show --format=prettyjson "${PROJECT_ID}:github_archive" 2>/dev/null | grep "deleted:serviceAccount:" || true)
     if [[ -z "${REMAINING}" ]]; then
-      echo "  Stale entries confirmed removed (attempt ${i}/${MAX_ATTEMPTS})."
+      echo "  Stale entries confirmed removed."
       break
     fi
-    if [[ ${i} -eq ${MAX_ATTEMPTS} ]]; then
-      echo "  WARNING: Stale entries still present after 2 minutes. Phase 3 destroy may fail."
-    else
-      echo "  Still present, waiting 10s (attempt ${i}/${MAX_ATTEMPTS})..."
-      sleep 10
+  else
+    if [[ "${CLEANED}" = "true" ]]; then
+      echo "  Stale entries confirmed removed."
+      break
     fi
-  done
-else
-  echo "  No stale SA entries found."
-fi
+    # No stale entries yet — may still be propagating
+    if [[ ${i} -lt 4 ]]; then
+      echo "  No stale entries found yet, waiting 10s for propagation (attempt ${i}/${MAX_ATTEMPTS})..."
+      sleep 10
+    else
+      echo "  No stale SA entries found."
+      break
+    fi
+  fi
+done
 
 # =============================================================================
 # Phase 3: BigQuery Loader (reverse layer order)
