@@ -54,6 +54,10 @@ secrets/
 *.csv
 data/
 
+# But keep schema files and terraform lock files
+!**/schema.json
+!**/.terraform.lock.hcl
+
 # Logs
 *.log
 logs/

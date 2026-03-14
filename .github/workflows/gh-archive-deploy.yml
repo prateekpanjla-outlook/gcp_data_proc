@@ -5,6 +5,11 @@ on:
     branches:
       - gh_archive_test
 
+# Only one deploy can run at a time — prevents terraform state lock conflicts
+concurrency:
+  group: gh-archive-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   REGION: us-central1
