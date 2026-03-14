@@ -26,7 +26,26 @@ Also grants the Cloud Scheduler service agent the `iam.serviceAccountTokenCreato
 | Downstream | `iam.tf` | Downloader SA is referenced for Artifact Registry reader role |
 | Downstream | Phase 2 (Eventarc) | Phase 2 watches the landing bucket that this SA writes to |
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+This file defines two service accounts and their core IAM bindings:
+
+| Service Account | ID Pattern | Purpose |
+|----------------|------------|---------|
+| **Downloader SA** | `{env}-github-archive-downloader@{project}.iam.gserviceaccount.com` | Runtime identity for the Cloud Run Job that downloads GitHub Archive files |
+| **Scheduler SA** | `{env}-scheduler@{project}.iam.gserviceaccount.com` | Identity used by Cloud Scheduler to invoke the Cloud Run Job via OAuth token |
+
+**Roles granted here**:
+
+| SA | Role | Why |
+|----|------|-----|
+| Downloader | `roles/storage.objectUser` | Read/write GCS objects in the landing bucket |
+| Downloader | `roles/logging.logWriter` | Emit structured logs from the Cloud Run Job |
+| Scheduler | `roles/iam.serviceAccountTokenCreator` (granted to Cloud Scheduler service agent) | Allows the service agent to mint OAuth tokens on behalf of the scheduler SA |
+
+**Cross-reference**: See `learnings/phase4_deployment_issues.md` (Issue 15) for how stale deleted SAs can block dataset IAM updates — this is especially relevant when destroying and recreating these SAs. See `learnings/github_actions_ci_issues.md` (Issue 7) for why remote state is critical to avoid orphaned SA resources in CI.
+
+## 5. Code Walkthrough
 
 1. **`google_service_account.github_archive_downloader`** -- Creates the downloader SA with an ID like `dev-github-archive-downloader`. Display name includes the environment.
 

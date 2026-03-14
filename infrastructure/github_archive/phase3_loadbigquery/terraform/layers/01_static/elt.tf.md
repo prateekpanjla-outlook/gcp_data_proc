@@ -22,7 +22,14 @@ Defines the ELT (Extract-Load-Transform) resources within the BigQuery `github_a
 | Downstream | BI/analytics consumers | Materialized view and logical views are queryable endpoints for dashboards and ad-hoc analysis |
 | Downstream | `hourly_activity_summary` table | The scheduled query appends aggregated rows to this destination table |
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+- **Scheduled query SA:** The BigQuery Data Transfer scheduled query (`hourly_activity`) runs as the `{env}-bq-loader` service account (created in `main.tf` in this same layer).
+- **Required role:**
+  - `roles/bigquery.admin` — granted at project level to `bq_loader`. The Data Transfer Service requires this elevated role to execute scheduled queries on behalf of the SA; `bigquery.jobUser` + `bigquery.dataEditor` alone are insufficient.
+- **Why admin?** BigQuery Data Transfer creates internal transfer configs and needs permissions beyond what `jobUser` provides, including the ability to manage transfer runs and write to destination tables.
+
+## 5. Code Walkthrough
 
 1. **Materialized View `mv_repo_daily_stats` (lines 4-32):** Aggregates `github_events` by day and `repo_name`, counting total events, pushes, issues, PRs, stars, forks, and approximate unique contributors. Auto-refreshes every 30 minutes (`refresh_interval_ms = 1800000`).
 

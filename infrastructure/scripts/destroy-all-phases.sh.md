@@ -25,7 +25,15 @@ Destroys the entire GitHub Archive pipeline infrastructure in reverse order: Pha
 - `gh-archive-destroy.yml` GitHub Actions workflow calls this script as the destroy step.
 - After this script completes, all GCP resources for the pipeline environment are removed.
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+- **Terraform deployer SA:** `{env}-terraform-deployer` — the script authenticates as this SA via `GOOGLE_APPLICATION_CREDENTIALS`, same as `deploy-all-phases.sh`.
+- **Stale SA cleanup:** After Phase 4 destroy deletes the `{env}-pipeline-dashboard` SA, GCP renames it to `deleted:serviceAccount:...` in any dataset-level IAM bindings (e.g., on `github_archive`). The script waits for propagation, then uses `bq query REVOKE` to remove the stale entry before proceeding to Phase 3 destroy. Without this step, Phase 3 destroy fails on IAM conflicts.
+- **Cross-reference:** `learnings/phase4_deployment_issues.md`:
+  - Issue 15 — documents the stale deleted SA problem and the `REVOKE` DDL fix used by this script.
+  - Issue 17 — stale terraform state after multi-layer destroy; the script includes `verify_empty_state` and `terraform state rm` to handle lingering state entries.
+
+## 5. Code Walkthrough
 
 1. **Argument parsing** (lines 16-18): Requires `PROJECT_ID` and `ENVIRONMENT`; `REGION` defaults to `us-central1`.
 2. **Path resolution & key fallback** (lines 23-33): Same fallback chain as `deploy-all-phases.sh`.

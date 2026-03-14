@@ -24,7 +24,21 @@ Terraform Layer 03 (Operational) for Phase 3. Deploys the Cloud Functions 2nd ge
 | Downstream | Cloud Functions 2nd gen / Cloud Run | The deployed function processes GCS events and runs BigQuery load jobs |
 | Downstream | BigQuery `github_events` table | Receives loaded data from the function |
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+This layer creates IAM bindings for the Cloud Function runtime and its supporting services:
+
+- **`{env}-bq-loader` SA** (Cloud Function runtime SA, read from Layer 01 remote state):
+  - `roles/artifactregistry.reader` — allows Cloud Build to pull base images when building the function.
+  - Runs as the `service_account_email` on the Cloud Function's service config, giving it all the BigQuery and Storage permissions granted in Layers 01 and 02.
+- **`{env}-eventarc-invoker` SA** (read from Layer 01 remote state):
+  - `roles/run.invoker` — allows Eventarc to invoke the Cloud Run service backing the 2nd gen Cloud Function.
+  - Set as the `service_account` on the Eventarc trigger for authenticated event delivery.
+- **GCS service agent** (`service-{project_number}@gs-project-accounts.iam.gserviceaccount.com`):
+  - `roles/pubsub.publisher` — allows GCS to publish object finalization events to the Pub/Sub topic used by Eventarc.
+- **Cloud Build SA:** `{env}-cloud-build` (from Phase 1) is used for the function build process.
+
+## 5. Code Walkthrough
 
 1. **Remote state data sources (lines 16-30):** Reads Layer 01 (`phase3-static`) and Layer 02 (`phase3-first-time`) state from the GCS backend.
 

@@ -23,7 +23,24 @@ Terraform Layer 01 (Static) main configuration for Phase 3. Provisions long-live
 | Downstream | `elt.tf` (same layer) | References `google_bigquery_dataset.github_archive` and `google_bigquery_table.github_events` for ELT views and materialized views |
 | Downstream | `main.py` | The Cloud Function writes to the BigQuery table created here |
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+This layer creates and configures two service accounts:
+
+- **`{env}-bq-loader`** — runtime SA for the Phase 3 Cloud Function.
+  - `roles/bigquery.dataEditor` — write to BigQuery tables.
+  - `roles/bigquery.jobUser` — submit BigQuery load jobs.
+  - `roles/logging.logWriter` — write Cloud Function logs.
+  - `roles/monitoring.metricWriter` — emit custom metrics.
+  - `roles/bigquery.admin` — required by BigQuery Data Transfer Service for scheduled queries (granted in `elt.tf`).
+- **`{env}-eventarc-invoker`** — authenticates Eventarc trigger delivery to the Cloud Function's backing Cloud Run service.
+  - `roles/eventarc.eventReceiver` — receive Cloud Storage finalization events.
+  - `roles/logging.logWriter` — write Eventarc-related logs.
+- **actAs bindings:** The Terraform deployer SA is granted `iam.serviceAccountUser` on both SAs so it can attach them to Cloud Function and Eventarc resources during deployment.
+- **Pub/Sub token creator:** The Pub/Sub service agent gets `iam.serviceAccountTokenCreator` on `eventarc_invoker` to mint OIDC tokens for event delivery.
+- **Cross-reference:** `learnings/phase4_deployment_issues.md` — Issue 4 documents the deployer SA missing `roles/logging.admin`, which is needed in Phase 4 but originates from the same deployer SA pattern established here.
+
+## 5. Code Walkthrough
 
 1. **Locals (lines 8-22):** Defines `env_prefix`, a `phase3_resources` map for service account IDs, and `common_labels` applied to all resources.
 

@@ -38,7 +38,25 @@ State is stored at `gs://beaming-glyph-489707-b8-terraform-state/terraform/state
 **Downstream (to Phase 3):**
 - Processed files are written to the staging bucket. Phase 3's Eventarc trigger watches the staging bucket to load NDJSON into BigQuery.
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+| Identity | Format | Purpose |
+|----------|--------|---------|
+| **Processor SA** | `{env}-github-archive-processor@{project}.iam.gserviceaccount.com` | Cloud Run service identity. Read from Layer 01 remote state via `processor_service_account_email`. The Cloud Run service's `service_account` field is set to this SA. |
+| **Eventarc Invoker SA** | `{env}-eventarc-invoker@{project}.iam.gserviceaccount.com` | Authenticates the Eventarc trigger when calling the Cloud Run service. Read from Layer 01 remote state via `eventarc_invoker_service_account_email`. |
+
+**IAM bindings created:**
+
+| SA | Role | Resource | Why |
+|----|------|----------|-----|
+| Eventarc Invoker | `roles/run.invoker` | Cloud Run processor service | Allows the Eventarc trigger to invoke the Cloud Run service via authenticated HTTP POST. |
+| Eventarc Invoker | `roles/eventarc.eventReceiver` | (inherited from Layer 02 service agent binding) | Allows the trigger to receive Cloud Storage events. |
+
+**IAM propagation notes:**
+- The `run.invoker` binding is applied directly to the Cloud Run service resource (not at the project level). This binding must propagate before the Eventarc trigger can successfully invoke the service. If the trigger fires before propagation completes, the invocation will fail with `403` and the event will be retried by Pub/Sub (up to the ack deadline).
+- The Processor SA and Eventarc Invoker SA are created in Layer 01 and referenced here by email via remote state. If Layer 01 is re-applied and a SA is deleted/recreated, this layer must also be re-applied to update the Cloud Run service and Eventarc trigger with the new SA identity. Stale SA references will cause `403 Forbidden` errors on both the Cloud Run service (storage access) and the Eventarc trigger (invocation).
+
+## 5. Code Walkthrough
 
 1. **Remote state data sources (lines 29-44):** Reads the `phase2-static` and `phase2-first-time` remote state from GCS. These provide SA emails, bucket names, and confirmation that prerequisite resources exist.
 

@@ -22,7 +22,15 @@
 - `02_first_time/main.tf` -- references `var.dashboard_sa_email` (the SA created here) and `var.pipeline_logs_dataset_id` (the dataset created here) to grant IAM permissions.
 - `03_operational/main.tf` -- references the SA email for the Cloud Run service account and the dataset ID for the log sink destination.
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+- **`{env}-pipeline-dashboard` SA** — created in this layer as `google_service_account.dashboard`. Used by the Cloud Run dashboard service to authenticate BigQuery queries.
+  - This SA does NOT serve as the log sink writer identity — GCP auto-generates a separate writer identity for log sinks.
+  - IAM roles are granted in Layer 02, not here, because the SA must exist before permissions can be bound.
+- **Cross-reference:** `learnings/phase4_deployment_issues.md`:
+  - Issue 15 — when this SA is destroyed and recreated, stale `deleted:serviceAccount:` entries appear in the `github_archive` dataset IAM. Layer 02 includes a cleanup step for this.
+
+## 5. Code Walkthrough
 
 1. **`google_bigquery_dataset.pipeline_logs` (lines 4-16)**: Creates a BigQuery dataset named `{env}_pipeline_logs`. Key settings:
    - `default_table_expiration_ms = 7776000000` -- 90-day TTL for all tables. Log data is transient and does not need permanent retention.

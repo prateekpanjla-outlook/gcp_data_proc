@@ -18,7 +18,20 @@ The module exposes a single public function `write_dataframe_to_gcs()`.
 | Downstream | **GCS staging bucket** | Output files land at `gs://{bucket}/{blob_name}` (e.g., `gs://staging-bucket/processed/2026-03-05-12-chunk-001.ndjson.gz`). |
 | Downstream | **Phase 3 BigQuery loader** | Reads the `.ndjson.gz` files from the staging bucket and loads them into BigQuery. |
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+| Identity | Format | Purpose |
+|----------|--------|---------|
+| **Processor SA** | `{env}-github-archive-processor@{project}.iam.gserviceaccount.com` | The `storage_client` passed into `write_dataframe_to_gcs()` is created by `file_processor.py` under the Cloud Run service account. |
+
+**Required roles/permissions:**
+- `roles/storage.objectCreator` on the **staging bucket** -- needed for `blob.open('wb')` streaming upload of `.ndjson.gz` files.
+
+**IAM propagation notes:**
+- If the `objectCreator` binding on the staging bucket is newly created or modified, there can be a propagation delay of up to 60 seconds. During this window, `blob.open('wb')` will raise `403 Forbidden`.
+- Stale SA issues: since the `storage_client` is passed in from `file_processor`, any cached credentials from a deleted-and-recreated SA will persist until the Cloud Run revision is redeployed.
+
+## 5. Code Walkthrough
 
 1. **`write_dataframe_to_gcs()` (lines 20-68)**: Main function.
    - **Parameters**: `df` (DataFrame to write), `blob_name` (GCS object path), `storage_client` (reused client from `file_processor`), `bucket_name`, `compress` (default `True`), `chunk_size` (upload chunk size, default 10 MB).

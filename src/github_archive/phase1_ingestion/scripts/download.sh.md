@@ -35,7 +35,23 @@ GCS Landing Bucket: gs://{PROJECT_ID}-{ENVIRONMENT}-github-archive-landing/githu
 - **Upstream**: Cloud Scheduler triggers the Cloud Run Job on an hourly schedule. No other input is required; the filename is derived from the current UTC time.
 - **Downstream**: The uploaded `.json.gz` file lands at `gs://{BUCKET}/github-archive/raw/{YYYY-MM-DD-H}.json.gz`. Phase 2 of the pipeline consumes files from this path.
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+**Runtime identity**: `{env}-github-archive-downloader@{project}.iam.gserviceaccount.com`
+
+This script runs inside a Cloud Run Job that uses the downloader SA. The SA requires:
+
+| Role | Why |
+|------|-----|
+| `roles/storage.objectUser` | Read/write GCS objects in the landing bucket (`gsutil cp`, `gsutil stat`, `gsutil du`) |
+| `roles/logging.logWriter` | Emit structured logs from the Cloud Run Job |
+| `roles/artifactregistry.reader` | Pull the container image from Artifact Registry at job startup |
+
+These roles are granted in `service_accounts.tf` and `iam.tf`.
+
+**Cross-reference**: See `learnings/phase4_deployment_issues.md` (Issue 15) for how stale deleted SAs can block IAM updates on datasets, and `learnings/github_actions_ci_issues.md` (Issue 7) for how ephemeral CI runners require remote state so IAM-dependent resources are tracked correctly.
+
+## 5. Code Walkthrough
 
 1. **Shell options** (line 11): `set -euo pipefail` enables strict error handling -- the script exits on any command failure, undefined variable, or pipe error.
 

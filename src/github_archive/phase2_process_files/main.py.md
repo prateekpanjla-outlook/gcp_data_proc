@@ -31,7 +31,21 @@ Key behaviors:
 | Downstream | **GCS staging bucket** | Receives processed `.ndjson.gz` chunks written by the file processor. |
 | Downstream | **Phase 3 BigQuery loader** | Picks up `.ndjson.gz` files from the staging bucket and loads them into BigQuery. |
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+| Identity | Format | Purpose |
+|----------|--------|---------|
+| **Processor SA** | `{env}-github-archive-processor@{project}.iam.gserviceaccount.com` | Cloud Run service identity. This is the SA the Flask app runs as in production. |
+
+**Required roles/permissions:**
+- `storage.objects.get` on the landing bucket -- needed to call `blob.reload()` for file-size checks and to download the source `.json.gz` file.
+- Additional storage permissions are exercised downstream via `file_processor` and `ndjson_writer`, but they run under the same SA since the `storage.Client` is created at module scope with Application Default Credentials (i.e., the Cloud Run service account).
+
+**IAM propagation notes:**
+- After Terraform creates or updates the processor SA's IAM bindings (Layer 01 static), there can be a propagation delay of up to 60 seconds before the new permissions take effect. If the Cloud Run service is deployed immediately after IAM changes, early requests may fail with `403 Forbidden` on `blob.reload()`.
+- If the SA key or binding is deleted and recreated (e.g., during `terraform destroy` / `apply` cycles), the old SA email may remain cached in Cloud Run's metadata server. Redeploying the Cloud Run revision forces it to pick up the new SA identity.
+
+## 5. Code Walkthrough
 
 1. **Module-level configuration (lines 20-30)**: Reads environment variables for project ID, bucket names, file size threshold, chunk size, and port. Initialises a `storage.Client` at module scope so it is reused across requests.
 

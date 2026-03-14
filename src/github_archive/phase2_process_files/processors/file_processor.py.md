@@ -21,7 +21,22 @@ The module exposes a single public function `process_file()` and a `FileProcessi
 | Downstream | **`writers/ndjson_writer.py`** | `write_dataframe_to_gcs()` streams each processed chunk to GCS as `.ndjson.gz`. |
 | Downstream | **GCS staging bucket** | Output destination; files are written as `processed/{date_prefix}-chunk-NNN.ndjson.gz`. |
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+| Identity | Format | Purpose |
+|----------|--------|---------|
+| **Processor SA** | `{env}-github-archive-processor@{project}.iam.gserviceaccount.com` | Cloud Run service identity inherited from `main.py`. The `storage.Client` created in this module uses Application Default Credentials, which resolve to this SA. |
+
+**Required roles/permissions:**
+- `roles/storage.objectViewer` on the **landing bucket** -- needed for `blob.reload()` (metadata fetch) and `blob.download_to_filename()` (file download).
+- `roles/storage.objectCreator` on the **staging bucket** -- needed to write processed `.ndjson.gz` chunks via `ndjson_writer`.
+- `roles/storage.objectViewer` on the **staging bucket** -- needed for the post-upload `blob.reload()` verification in `ndjson_writer`.
+
+**IAM propagation notes:**
+- If the processor SA's storage bindings are updated in Terraform (Layer 01 static), the change may take up to 60 seconds to propagate. During this window, `blob.reload()` or `blob.download_to_filename()` calls will raise `google.api_core.exceptions.Forbidden`.
+- Stale SA issues: if a SA is deleted and recreated with the same email, existing Cloud Run revisions may still hold a cached identity token for the old SA. A new Cloud Run revision deployment is required to pick up the fresh credentials.
+
+## 5. Code Walkthrough
 
 1. **`FileProcessingResult` dataclass (lines 33-44)**: Captures all processing metrics: `success`, `input_file`, `output_file` (first chunk), `output_files` (all chunks), `records_in`, `records_out`, `errors`, `warnings`, `duration_seconds`, and an optional `error_message`.
 

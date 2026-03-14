@@ -22,7 +22,21 @@ This resource increases the ack deadline to 600 seconds (the Pub/Sub maximum).
 **Downstream:**
 - No other Terraform resources depend on this. It is a terminal configuration step that affects runtime behavior (preventing duplicate message delivery).
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+| Identity | Format | Purpose |
+|----------|--------|---------|
+| **Deployer SA** | Key file at `var.deployer_sa_key_path` | Authenticates `gcloud` to run `gcloud eventarc triggers describe` and `gcloud pubsub subscriptions update`. |
+
+**Required roles/permissions:**
+- **Deployer SA** needs:
+  - `roles/eventarc.viewer` -- to describe the Eventarc trigger and extract the auto-created Pub/Sub subscription name.
+  - `roles/pubsub.editor` -- to update the ack deadline on the Pub/Sub subscription.
+
+**IAM propagation notes:**
+- This resource runs after the Eventarc trigger is created. If the trigger was just created, the underlying Pub/Sub subscription may not be immediately discoverable by `gcloud eventarc triggers describe`. In practice this is handled by the `depends_on` chain, but if the command fails with "subscription not found," a short wait and re-apply resolves it.
+
+## 5. Code Walkthrough
 
 1. **`depends_on` (line 7):** Ensures the Eventarc trigger exists before attempting to modify its subscription.
 

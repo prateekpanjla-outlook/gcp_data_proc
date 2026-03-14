@@ -32,7 +32,37 @@ State is stored at `gs://beaming-glyph-489707-b8-terraform-state/terraform/state
   - `staging_bucket_name` and `landing_bucket_name` (Cloud Run env vars)
 - **Phase 3:** The staging bucket created here is watched by Phase 3's Eventarc trigger to load data into BigQuery.
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+This layer is the **primary IAM layer** for Phase 2 -- it creates all three service accounts and their IAM bindings.
+
+| Identity | Format | Purpose |
+|----------|--------|---------|
+| **Processor SA** | `{env}-github-archive-processor@{project}.iam.gserviceaccount.com` | Cloud Run service runtime identity. Processes GitHub Archive files. |
+| **Splitter SA** | `{env}-file-splitter@{project}.iam.gserviceaccount.com` | Cloud Run Job identity for splitting large files. Not yet used in production. |
+| **Eventarc Invoker SA** | `{env}-eventarc-invoker@{project}.iam.gserviceaccount.com` | Authenticates the Eventarc trigger when invoking the Cloud Run processor service. |
+
+**IAM bindings created:**
+
+| SA | Role | Resource | Why |
+|----|------|----------|-----|
+| Processor | `roles/storage.objectViewer` | Landing bucket | Read source `.json.gz` files and call `blob.reload()` for metadata. |
+| Processor | `roles/storage.objectCreator` | Staging bucket | Write processed `.ndjson.gz` chunks. |
+| Processor | `roles/storage.objectViewer` | Staging bucket | Post-upload `blob.reload()` verification. |
+| Processor | `roles/logging.logWriter` | Project | Write structured logs from Cloud Run. |
+| Processor | `roles/monitoring.metricWriter` | Project | Emit custom metrics. |
+| Splitter | `roles/storage.objectViewer` | Landing bucket | Read raw files to split. |
+| Splitter | `roles/storage.objectCreator` | Landing bucket | Write chunk files back to `landing/chunks/`. |
+| Splitter | `roles/logging.logWriter` | Project | Write logs. |
+| Splitter | `roles/monitoring.metricWriter` | Project | Emit metrics. |
+| Eventarc Invoker | `roles/logging.logWriter` | Project | Write logs. |
+
+**IAM propagation notes:**
+- After `terraform apply` on this layer, IAM bindings may take up to 60 seconds to propagate. Do not immediately apply Layer 03 (which deploys the Cloud Run service) -- if the processor SA's storage bindings have not propagated, early Eventarc-triggered requests will fail with `403 Forbidden`.
+- If a SA is deleted and recreated (e.g., `terraform destroy` then `apply`), the SA email stays the same but the underlying UID changes. Any existing Cloud Run revisions referencing the old SA will fail with stale credential errors until a new revision is deployed.
+- Service Agent IAM (for the Storage and Eventarc Google-managed agents) is intentionally deferred to Layer 02 because those agents require their APIs to be enabled first.
+
+## 5. Code Walkthrough
 
 1. **Terraform/provider block (lines 1-25):** Pins Terraform >= 1.5, Google provider ~> 7.0, and stores state at prefix `phase2-static`.
 

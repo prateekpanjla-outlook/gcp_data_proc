@@ -27,7 +27,25 @@ The build is triggered locally (not via a Cloud Build trigger resource) and re-r
 **Downstream:**
 - The built image (`processor:latest`) is referenced by the Cloud Run service definition (in `main.tf` or `layers/03_operational/main.tf`).
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+| Identity | Format | Purpose |
+|----------|--------|---------|
+| **Cloud Build SA** | `{env}-cloud-build@{project}.iam.gserviceaccount.com` | Runs the `gcloud builds submit` build. Specified via `--service-account` so the build does not use the default Compute Engine SA. Created in Phase 1. |
+| **Deployer SA** | Key file at `var.deployer_sa_key_path` | Used by `gcloud auth activate-service-account` to authenticate the local `gcloud` CLI before submitting the build. |
+
+**Required roles/permissions:**
+- **Cloud Build SA** needs:
+  - `roles/cloudbuild.builds.builder` -- to execute builds.
+  - `roles/artifactregistry.writer` on the `{env}-github-archive` Artifact Registry repo -- to push the built Docker image.
+  - `roles/iam.serviceAccountUser` on the Processor SA -- to deploy Cloud Run services that run as the processor SA (granted in Layer 02).
+- **Deployer SA** needs:
+  - `roles/cloudbuild.builds.editor` -- to submit builds via `gcloud builds submit`.
+
+**IAM propagation notes:**
+- The Cloud Build SA and its Artifact Registry permissions are created in Phase 1. If Phase 1 IAM bindings are recently applied, allow up to 60 seconds for propagation before running `terraform apply` on this file, otherwise the build may fail with permission denied on the Artifact Registry push step.
+
+## 5. Code Walkthrough
 
 1. **`triggers` block (lines 7-11):** Computes SHA-256 hashes of `Dockerfile.processor`, `requirements.txt`, and `cloudbuild-phase2.yaml`. If any hash changes between applies, Terraform destroys and recreates the `null_resource`, which re-runs the build.
 

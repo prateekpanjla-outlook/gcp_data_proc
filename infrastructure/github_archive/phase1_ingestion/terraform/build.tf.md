@@ -30,7 +30,18 @@ Both use `local-exec` provisioners with bash scripts.
 | Upstream | Source code | `Dockerfile`, `download.sh`, `cloudbuild-phase1.yaml` -- changes to these files trigger a rebuild (via `triggers` block) |
 | Downstream | `cloud_run_jobs.tf` | The Cloud Run Job depends on `build_downloader_image` to ensure the image exists |
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+**Build SA**: `{env}-cloud-build@{project}.iam.gserviceaccount.com` (defined in `cloudbuild_sa.tf`)
+
+This file depends heavily on IAM being fully propagated before submitting a build:
+
+- **IAM propagation wait**: The `null_resource.wait_for_iam_propagation` polls the GCS `testPermissions` API to verify the Cloud Build SA's `storage.objects.get` and `storage.objects.create` permissions are active. It retries up to 12 times (10s apart, 120s max) because GCP IAM changes can take 60-90 seconds to propagate.
+- **Build submission**: `gcloud builds submit` uses `--service-account` to run the build as the Cloud Build SA, which requires `roles/cloudbuild.builds.builder` and `roles/iam.serviceAccountUser`.
+
+**Cross-reference**: See `learnings/phase4_deployment_issues.md` (Issue 3) for the `--default-buckets-behavior` requirement when using a custom SA with Cloud Build. See `learnings/github_actions_ci_issues.md` (Issue 5, Issue 6) for `gcloud beta --quiet` and PowerShell-to-bash issues in these provisioners on CI runners.
+
+## 5. Code Walkthrough
 
 1. **`null_resource.wait_for_iam_propagation`** (lines 5-38):
    - Depends on `google_project_iam_member.cloudbuild_sa_roles` to ensure IAM policies are written.

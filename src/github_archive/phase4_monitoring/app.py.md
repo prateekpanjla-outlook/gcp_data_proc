@@ -27,7 +27,20 @@ The app exposes seven routes: an overview dashboard (`/`), per-phase detail page
 - `templates/*.html` -- Jinja2 templates that receive query results as template variables (`daily`, `errors`, `downloads`, `files`, `loads`, `repos`, `developers`, `bot_human`).
 - `Dockerfile` -- copies this file into the container and runs it via gunicorn with the WSGI entry point `app:app`.
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+- **Runtime SA:** `{env}-pipeline-dashboard` — the Cloud Run dashboard service executes as this service account.
+- **Required roles:**
+  - `roles/bigquery.jobUser` — submit BigQuery queries (project-level).
+  - `roles/bigquery.dataViewer` — read tables in both `pipeline_logs` and `github_archive` datasets.
+  - `roles/bigquery.resourceViewer` — query `INFORMATION_SCHEMA.JOBS` for Phase 3 load job metadata.
+- **Where granted:** Layer 02 (`02_first_time/main.tf`) grants all three roles. The `dataViewer` role is granted at dataset level on both `pipeline_logs` and `github_archive`.
+- **Cross-reference:** `learnings/phase4_deployment_issues.md`:
+  - Issue 10 — `bigquery.resourceViewer` was missing; required for `INFORMATION_SCHEMA.JOBS` queries.
+  - Issue 11 — `dataViewer` on `github_archive` was missing; required for ELT views and Phase 3 row counts.
+  - Issue 15 — stale deleted SA blocks dataset IAM updates on `github_archive` after destroy/recreate cycles.
+
+## 5. Code Walkthrough
 
 1. **Module-level setup (lines 1-21)**: Imports Flask and BigQuery client. Reads `PROJECT_ID` and `DATASET_ID` from environment variables. Creates a module-level `bq_client` instance reused across all requests.
 

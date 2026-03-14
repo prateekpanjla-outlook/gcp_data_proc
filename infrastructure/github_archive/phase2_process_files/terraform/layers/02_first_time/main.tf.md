@@ -32,7 +32,29 @@ State is stored at `gs://beaming-glyph-489707-b8-terraform-state/terraform/state
 - **Layer 03 (`03_operational`):** Reads `terraform_remote_state.first_time` to confirm APIs are enabled. The Eventarc trigger depends on the service agent IAM bindings created here.
 - The Cloud Build trigger created here can be invoked manually or connected to GitHub for automated builds.
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+| Identity | Format | Purpose |
+|----------|--------|---------|
+| **Storage service agent** | `service-{project_number}@gs-project-accounts.iam.gserviceaccount.com` | Google-managed agent that publishes Cloud Storage events to Pub/Sub. |
+| **Eventarc service agent** | `service-{project_number}@gcp-sa-eventarc.iam.gserviceaccount.com` | Google-managed agent that manages Eventarc trigger lifecycle. |
+| **Cloud Build SA** | `{env}-cloud-build@{project}.iam.gserviceaccount.com` | Runs Cloud Build builds and deploys Cloud Run services. Created in Phase 1. |
+| **Processor SA** | `{env}-github-archive-processor@{project}.iam.gserviceaccount.com` | Referenced as the target of the `actAs` binding so Cloud Build can deploy Cloud Run services that run as this SA. Created in Layer 01. |
+
+**IAM bindings created:**
+
+| SA / Agent | Role | Resource | Why |
+|------------|------|----------|-----|
+| Storage service agent | `roles/pubsub.publisher` | Project | Allows Cloud Storage to publish `object.finalized` events to Pub/Sub, which Eventarc consumes. |
+| Eventarc service agent | `roles/eventarc.eventReceiver` | Project | Allows the Eventarc agent to receive and route events. |
+| Cloud Build SA | `roles/iam.serviceAccountUser` | Processor SA | Allows Cloud Build to impersonate the processor SA when deploying Cloud Run services (`--service-account` flag on `gcloud run deploy`). |
+
+**IAM propagation notes:**
+- The service agent IAM bindings (`pubsub.publisher`, `eventarc.eventReceiver`) must propagate before Layer 03's Eventarc trigger can function. If Layer 03 is applied immediately after Layer 02, the trigger may fail to create or may not receive events. Allow at least 60 seconds between layer applies.
+- The `actAs` binding on the processor SA is critical for Cloud Build deployments. If this binding is missing or has not propagated, `gcloud run deploy` in the Cloud Build step will fail with "Permission 'iam.serviceAccounts.actAs' denied."
+- Stale SA risk: if the Cloud Build SA from Phase 1 is deleted and recreated, the `actAs` binding references the SA by email, so it will automatically apply to the new SA -- but the old Cloud Build trigger resource may still cache the old SA UID internally. Re-applying this layer resolves the reference.
+
+## 5. Code Walkthrough
 
 1. **Terraform/provider block (lines 1-25):** Standard setup with state at prefix `phase2-first-time`.
 

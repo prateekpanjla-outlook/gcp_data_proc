@@ -20,7 +20,19 @@ Terraform Layer 02 (First-time) for Phase 3. Provisions IAM bindings that requir
 | Downstream | Layer 03 (`03_operational`) | Requires these IAM bindings to exist before the Cloud Function can read from the staging bucket and write to BigQuery |
 | Downstream | `main.py` (Cloud Function) | The function's runtime SA (`bq_loader`) relies on the bucket and dataset IAM bindings created here |
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+This layer grants bucket- and dataset-scoped IAM bindings that require APIs from Layer 01 to be enabled:
+
+- **`{env}-bq-loader` SA** (read from Layer 01 remote state):
+  - `roles/bigquery.dataEditor` on `github_archive` dataset — write rows to tables (supplements the project-level `bigquery.jobUser` from Layer 01).
+  - `roles/storage.objectViewer` on the staging bucket — allows BigQuery load jobs to read `.ndjson.gz` source files.
+  - `roles/storage.objectAdmin` on the staging bucket — allows the Cloud Function to delete source files after successful loads.
+- **Eventarc service agent** (`service-{project_number}@gcp-sa-eventarc.iam.gserviceaccount.com`):
+  - `roles/storage.objectViewer` on the staging bucket — required for Eventarc to validate the bucket when creating the trigger in Layer 03.
+- **Cross-reference:** `learnings/phase4_deployment_issues.md` — Issue 11 shows that cross-dataset `dataViewer` grants (like Phase 4 dashboard needing access to `github_archive`) follow the same pattern used here.
+
+## 5. Code Walkthrough
 
 1. **Remote state data source (lines 11-17):** Reads Layer 01 outputs from the GCS backend at `terraform/state/phase3-static`.
 

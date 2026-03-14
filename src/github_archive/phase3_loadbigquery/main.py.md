@@ -26,7 +26,17 @@ Cloud Function (2nd gen) entry point that loads processed GitHub Archive `.ndjso
 | Downstream | BigQuery `github_events` table | Receives appended rows via BQ load jobs |
 | Downstream | ELT views/MV (`elt.tf`) | Materialized view `mv_repo_daily_stats`, scheduled query `hourly_activity_summary`, staging view `stg_events`, mart views `developer_daily_activity` and `bot_vs_human_activity` all read from `github_events` |
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+- **Runtime SA:** `{env}-bq-loader` — the Cloud Function executes as this service account.
+- **Required roles:**
+  - `roles/bigquery.dataEditor` — write (append) rows to the `github_events` table via load jobs.
+  - `roles/bigquery.jobUser` — submit BigQuery load jobs.
+  - `roles/storage.objectAdmin` — read source `.ndjson.gz` files from the staging bucket and delete them after successful loads (`DELETE_AFTER_LOAD`).
+- **Where granted:** Layer 01 (`main.tf`) grants the project-level BigQuery roles; Layer 02 (`main.tf`) grants bucket-scoped Storage roles. See `infrastructure/github_archive/phase3_loadbigquery/terraform/layers/`.
+- **Cross-reference:** `learnings/phase4_deployment_issues.md` — Issue 11 documents a case where a different SA needed `dataViewer` on the `github_archive` dataset to join against `github_events`.
+
+## 5. Code Walkthrough
 
 1. **Module-level initialization (lines 15-34):** Imports GCP client libraries, configures logging, reads environment variables, and creates singleton `bigquery.Client` and `storage.Client` instances (reused across invocations for connection pooling).
 

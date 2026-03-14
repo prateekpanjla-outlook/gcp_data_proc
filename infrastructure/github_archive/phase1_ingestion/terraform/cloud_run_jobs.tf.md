@@ -22,7 +22,23 @@ Defines the Cloud Run v2 Job that downloads hourly GitHub Archive files and stre
 | Downstream | `scheduler.tf` | Cloud Scheduler invokes this job on a cron schedule |
 | Downstream | `storage.tf` (landing bucket) | The job writes downloaded files to the `BUCKET_NAME` passed via env var |
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+**Runtime identity**: `{env}-github-archive-downloader@{project}.iam.gserviceaccount.com` (defined in `service_accounts.tf`)
+
+The Cloud Run Job runs as the downloader SA, which has these roles:
+
+| Role | Granted in | Why |
+|------|-----------|-----|
+| `roles/storage.objectUser` | `service_accounts.tf` | Read/write GCS objects in the landing bucket |
+| `roles/logging.logWriter` | `service_accounts.tf` | Emit structured logs |
+| `roles/artifactregistry.reader` | `iam.tf` | Pull the container image from Artifact Registry at job startup |
+
+The SA email is set via the `service_account` field in the job's template spec. Cloud Run uses this SA for all API calls made by the running container.
+
+**Cross-reference**: See `learnings/phase4_deployment_issues.md` (Issue 15) for how destroying and recreating a SA can leave stale IAM bindings on datasets. See `learnings/github_actions_ci_issues.md` (Issue 7) for how lost terraform state can orphan Cloud Run Jobs and their SA bindings.
+
+## 5. Code Walkthrough
 
 1. **`google_cloud_run_v2_job.github_archive_downloader`** -- Creates a Cloud Run v2 Job named `{env}-github-archive-download-gsutil`.
 

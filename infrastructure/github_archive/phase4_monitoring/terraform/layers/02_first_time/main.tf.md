@@ -22,7 +22,24 @@
 **Downstream (what depends on this layer)**:
 - `03_operational/main.tf` -- the Cloud Run service needs IAM permissions to be in place before it can successfully query BigQuery.
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+This layer grants all IAM permissions needed by the `{env}-pipeline-dashboard` SA (created in Layer 01):
+
+- **Project-level roles:**
+  - `roles/bigquery.jobUser` — run BigQuery queries.
+  - `roles/bigquery.resourceViewer` — query `INFORMATION_SCHEMA.JOBS` for load job metadata.
+- **Dataset-level roles:**
+  - `roles/bigquery.dataViewer` on `pipeline_logs` — read Cloud Logging export tables.
+  - `roles/bigquery.dataViewer` on `github_archive` — read `github_events`, ELT views, and materialized views (cross-phase access).
+- **Stale SA cleanup:** `null_resource.cleanup_stale_sa_bindings` removes `deleted:serviceAccount:` entries from the `github_archive` dataset IAM that accumulate after Phase 4 destroy/recreate cycles. Without this cleanup, Terraform's `google_bigquery_dataset_iam_member` fails with "member is of an unknown type".
+- **IAM verification:** `null_resource.verify_dashboard_iam` polls to confirm the SA can actually access `github_archive` after granting, accounting for IAM propagation delay.
+- **Cross-reference:** `learnings/phase4_deployment_issues.md`:
+  - Issue 10 — `bigquery.resourceViewer` was added here after discovering `INFORMATION_SCHEMA.JOBS` queries failed without it.
+  - Issue 11 — `dataViewer` on `github_archive` was added here after the dashboard could not read Phase 3 data.
+  - Issue 15 — stale SA cleanup was added here to handle destroy/recreate IAM conflicts.
+
+## 5. Code Walkthrough
 
 1. **Commented-out `logging.googleapis.com` (lines 4-11)**: The logging API resource is intentionally not managed here. A comment explains that `logging.googleapis.com` is always enabled by default and managing it causes stale state issues on destroy.
 

@@ -21,7 +21,22 @@ Creates the Cloud Scheduler job that triggers the GitHub Archive download Cloud 
 | Downstream | Cloud Run Job execution | Each cron tick triggers a job execution that downloads a GitHub Archive file |
 | Downstream | Phase 2 | Indirectly triggers Phase 2 by creating objects in the landing bucket |
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+**Scheduler identity**: `{env}-scheduler@{project}.iam.gserviceaccount.com` (defined in `service_accounts.tf`)
+
+The scheduler uses this SA in its `oauth_token` block to authenticate HTTP calls to the Cloud Run Jobs API. Two IAM bindings make this work:
+
+| Role | Target | Granted in | Why |
+|------|--------|-----------|-----|
+| `roles/iam.serviceAccountTokenCreator` | Granted to Cloud Scheduler service agent on the scheduler SA | `service_accounts.tf` | Allows the service agent to mint OAuth tokens on behalf of the scheduler SA |
+| `roles/run.invoker` | Granted to scheduler SA on the specific Cloud Run Job | `scheduler.tf` (this file) | Allows the scheduler SA to invoke the Cloud Run Job via the Jobs API |
+
+The `run.invoker` binding is resource-level (not project-level), following the principle of least privilege — the scheduler SA can only invoke this specific job, not any Cloud Run resource.
+
+**Cross-reference**: See `learnings/phase4_deployment_issues.md` (Issue 15) for stale SA cleanup issues. See `learnings/github_actions_ci_issues.md` (Issue 7) for how ephemeral runners require remote state to track IAM bindings correctly.
+
+## 5. Code Walkthrough
 
 1. **`google_cloud_scheduler_job.github_archive_download`** -- Creates a scheduler job named `{env}-github-archive-download-job` with a `30 * * * *` cron schedule (every hour at :30, UTC).
 

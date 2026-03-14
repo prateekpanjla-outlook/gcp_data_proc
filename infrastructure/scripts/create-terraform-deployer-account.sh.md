@@ -26,7 +26,32 @@ Creates a GCP service account for Terraform deployments, grants it all IAM roles
 - `cloudbuild-ci-test.yaml` expects the key at `/workspace/infrastructure/<ENVIRONMENT>-terraform-deployer-key.json`.
 - GitHub Actions workflows expect the key base64-encoded in `GCP_SA_KEY_BASE64` secret.
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+This script creates and configures the `{env}-terraform-deployer` SA with 14 IAM roles:
+
+| Role | Purpose |
+|------|---------|
+| `roles/editor` | Broad project access for resource management |
+| `roles/resourcemanager.projectIamAdmin` | Manage IAM bindings for other SAs |
+| `roles/iam.serviceAccountAdmin` | Create and manage phase-specific SAs (bq_loader, eventarc_invoker, pipeline-dashboard) |
+| `roles/iam.serviceAccountTokenCreator` | Mint tokens for SA impersonation (Pub/Sub, Eventarc) |
+| `roles/cloudbuild.builds.builder` | Submit Cloud Build jobs for Docker images |
+| `roles/run.admin` | Deploy Cloud Run services (Phase 2, Phase 4) |
+| `roles/cloudscheduler.admin` | Manage Cloud Scheduler jobs (Phase 1) |
+| `roles/storage.admin` | Create and manage GCS buckets |
+| `roles/artifactregistry.admin` | Create and manage Artifact Registry repos |
+| `roles/bigquery.admin` | Create datasets, tables, views, scheduled queries |
+| `roles/pubsub.admin` | Manage Pub/Sub topics for Eventarc |
+| `roles/cloudfunctions.admin` | Deploy Cloud Functions (Phase 3) |
+| `roles/monitoring.admin` | Manage monitoring resources |
+| `roles/eventarc.admin` | Create Eventarc triggers |
+| `roles/logging.admin` | Create log sinks (Phase 4) |
+
+- **Cross-reference:** `learnings/phase4_deployment_issues.md`:
+  - Issue 4 — `roles/logging.admin` was discovered missing during Phase 4 deployment and added to this script's role list.
+
+## 5. Code Walkthrough
 
 1. **Logging** (lines 13-27): Creates `logs/create-terraform-sa-<timestamp>.log` and tees all output.
 2. **Argument validation** (lines 31-39): Accepts `PROJECT_ID` as positional arg or env var; `ENVIRONMENT` defaults to `dev`.

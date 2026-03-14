@@ -25,7 +25,16 @@ Deploys the entire GitHub Archive pipeline infrastructure across four phases in 
 - `gh-archive-deploy.yml` GitHub Actions workflow calls this script as the deploy step.
 - `destroy-all-phases.sh` tears down everything this script creates.
 
-## 4. Code Walkthrough
+## 4. IAM & Service Accounts
+
+- **Terraform deployer SA:** `{env}-terraform-deployer` — the script authenticates as this SA by exporting `GOOGLE_APPLICATION_CREDENTIALS` pointing to the SA key file. All `terraform apply` commands run under this identity.
+- **Key file resolution:** Looks for the key at `infrastructure/{env}-terraform-deployer-key.json`, falls back to `test-terraform-deployer-key.json`, then to the `GOOGLE_APPLICATION_CREDENTIALS` environment variable.
+- **Required deployer permissions:** The deployer SA needs 14+ roles (created by `create-terraform-deployer-account.sh`) to provision resources across all four phases, including `roles/bigquery.admin`, `roles/run.admin`, `roles/cloudfunctions.admin`, `roles/eventarc.admin`, `roles/logging.admin`, and `roles/iam.serviceAccountAdmin`.
+- **Cross-reference:** `learnings/phase4_deployment_issues.md`:
+  - Issue 4 — `roles/logging.admin` was initially missing from the deployer SA, causing log sink creation to fail in Phase 4.
+  - Issue 5 — the `GOOGLE_APPLICATION_CREDENTIALS` path must be absolute when using `terraform -chdir`.
+
+## 5. Code Walkthrough
 
 1. **Argument parsing** (lines 16-18): Requires `PROJECT_ID` and `ENVIRONMENT`; `REGION` defaults to `us-central1`.
 2. **Path resolution** (lines 23-34): Resolves repo root, base infrastructure path, and SA key file with two fallback locations.
