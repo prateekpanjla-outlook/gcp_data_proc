@@ -2,7 +2,7 @@
 -- Useful for alerting and debugging
 
 SELECT
-    timestamp,
+    DATETIME(timestamp, 'Asia/Kolkata') AS timestamp_ist,
     resource.type AS service_type,
     CASE resource.type
         WHEN 'cloud_run_job' THEN 'phase1_ingestion'
@@ -11,7 +11,7 @@ SELECT
     END AS phase,
     severity,
     textPayload AS error_message
-FROM `PROJECT_ID.pipeline_logs.*`
+FROM `PROJECT_ID.DATASET_ID.*`
 WHERE severity IN ('ERROR', 'WARNING')
 ORDER BY timestamp DESC
 LIMIT 100

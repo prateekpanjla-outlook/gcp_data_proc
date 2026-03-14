@@ -2,7 +2,7 @@
 -- Aggregated view across Phase 2
 
 SELECT
-    DATE(timestamp) AS day,
+    DATE(timestamp, 'Asia/Kolkata') AS day,
     COUNT(*) AS files_processed,
     SUM(CAST(REGEXP_EXTRACT(textPayload, r'(\d+) in,') AS INT64)) AS total_records_in,
     SUM(CAST(REGEXP_EXTRACT(textPayload, r'(\d+) out,') AS INT64)) AS total_records_out,
@@ -14,7 +14,7 @@ SELECT
             SUM(CAST(REGEXP_EXTRACT(textPayload, r'(\d+) in,') AS INT64))
         ) * 100, 2
     ) AS error_rate_pct
-FROM `PROJECT_ID.pipeline_logs.run_googleapis_com_stdout`
+FROM `PROJECT_ID.DATASET_ID.run_googleapis_com_stderr`
 WHERE
     textPayload LIKE '%Completed%'
     AND textPayload LIKE '%in,%out,%errors%'

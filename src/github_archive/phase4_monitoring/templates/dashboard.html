@@ -15,14 +15,36 @@
         .warning { color: #ffd93d; }
         .nav { margin-bottom: 2rem; }
         .nav a { margin-right: 1.5rem; }
+        .arch { display: flex; align-items: center; gap: 0; margin: 1.5rem 0; flex-wrap: wrap; }
+        .arch-box { border: 2px solid #00d4ff; border-radius: 8px; padding: 10px 16px; text-align: center; background: #16213e; }
+        .arch-box .label { color: #00d4ff; font-size: 0.85em; }
+        .arch-box .name { color: #e0e0e0; font-size: 0.75em; margin-top: 4px; }
+        .arch-arrow { color: #7b68ee; font-size: 1.5em; padding: 0 8px; }
     </style>
 </head>
 <body>
     <h1>GitHub Archive Pipeline</h1>
     <div class="nav">
         <a href="/">Overview</a>
+        <a href="/phase1">Phase 1 Detail</a>
         <a href="/phase2">Phase 2 Detail</a>
         <a href="/phase3">Phase 3 Detail</a>
+    </div>
+
+    <div class="arch">
+        <div class="arch-box"><div class="label">Cloud Scheduler</div><div class="name">hourly trigger</div></div>
+        <div class="arch-arrow">&#x2192;</div>
+        <div class="arch-box"><div class="label">Cloud Run Job</div><div class="name">download</div></div>
+        <div class="arch-arrow">&#x2192;</div>
+        <div class="arch-box"><div class="label">GCS Landing</div><div class="name">*.json.gz</div></div>
+        <div class="arch-arrow">&#x2192;</div>
+        <div class="arch-box"><div class="label">Cloud Run Service</div><div class="name">processor</div></div>
+        <div class="arch-arrow">&#x2192;</div>
+        <div class="arch-box"><div class="label">GCS Staging</div><div class="name">*.ndjson.gz</div></div>
+        <div class="arch-arrow">&#x2192;</div>
+        <div class="arch-box"><div class="label">Cloud Function</div><div class="name">bq-loader</div></div>
+        <div class="arch-arrow">&#x2192;</div>
+        <div class="arch-box"><div class="label">BigQuery</div><div class="name">github_events</div></div>
     </div>
 
     <h2>Daily Throughput</h2>
@@ -52,14 +74,14 @@
     <h2>Recent Errors</h2>
     <table>
         <tr>
-            <th>Timestamp</th>
+            <th>Timestamp (IST)</th>
             <th>Phase</th>
             <th>Severity</th>
             <th>Message</th>
         </tr>
         {% for row in errors %}
         <tr>
-            <td>{{ row.timestamp }}</td>
+            <td>{{ row.timestamp_ist }}</td>
             <td>{{ row.phase }}</td>
             <td class="{{ 'error' if row.severity == 'ERROR' else 'warning' }}">{{ row.severity }}</td>
             <td>{{ row.error_message }}</td>

@@ -4,7 +4,7 @@
 
 # Log sink: exports logs from all 3 phases to BQ
 resource "google_logging_project_sink" "pipeline_logs" {
-  name        = "github-archive-pipeline-logs"
+  name        = "${var.environment}-github-archive-pipeline-logs"
   project     = var.project_id
   destination = "bigquery.googleapis.com/projects/${var.project_id}/datasets/${var.pipeline_logs_dataset_id}"
 
@@ -28,9 +28,37 @@ resource "google_bigquery_dataset_iam_member" "log_sink_auto_writer" {
   member     = google_logging_project_sink.pipeline_logs.writer_identity
 }
 
+# Build and push dashboard Docker image to Artifact Registry
+resource "null_resource" "build_dashboard_image" {
+  # Rebuild when source code changes
+  triggers = {
+    dockerfile_hash   = filesha256("${path.module}/../../../../../../src/github_archive/phase4_monitoring/Dockerfile")
+    requirements_hash = filesha256("${path.module}/../../../../../../src/github_archive/phase4_monitoring/requirements.txt")
+    app_hash          = filesha256("${path.module}/../../../../../../src/github_archive/phase4_monitoring/app.py")
+  }
+
+  provisioner "local-exec" {
+    command = format(
+      "gcloud auth activate-service-account --key-file=%s; gcloud builds submit %s --tag=%s-docker.pkg.dev/%s/%s/pipeline-dashboard:latest --project=%s --service-account=projects/%s/serviceAccounts/%s-cloud-build@%s.iam.gserviceaccount.com --default-buckets-behavior=REGIONAL_USER_OWNED_BUCKET",
+      var.deployer_sa_key_path,
+      "${path.module}/../../../../../../src/github_archive/phase4_monitoring",
+      var.region,
+      var.project_id,
+      var.artifact_registry_repo,
+      var.project_id,
+      var.project_id,
+      var.environment,
+      var.project_id
+    )
+    interpreter = ["powershell", "-Command"]
+  }
+}
+
 # Cloud Run service for dashboard UI
 resource "google_cloud_run_v2_service" "dashboard" {
-  name     = "github-archive-dashboard"
+  depends_on = [null_resource.build_dashboard_image]
+
+  name     = "${var.environment}-github-archive-dashboard"
   location = var.region
   project  = var.project_id
 

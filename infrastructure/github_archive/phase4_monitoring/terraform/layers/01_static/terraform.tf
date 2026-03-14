@@ -6,13 +6,8 @@ terraform {
       version = "~> 5.0"
     }
   }
-
-  # backend "gcs" {
-  #   bucket         = "REPLACE_WITH_TERRAFORM_STATE_BUCKET"
-  #   prefix         = "terraform/state/phase3-operational"
-  # }
-  # Using local backend for development
 }
+
 provider "google" {
   project         = var.project_id
   region          = var.region

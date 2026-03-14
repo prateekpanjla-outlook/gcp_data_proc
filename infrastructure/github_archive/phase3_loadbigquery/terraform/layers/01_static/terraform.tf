@@ -15,8 +15,9 @@ terraform {
 }
 
 provider "google" {
-  project = var.project_id
-  region  = var.region
+  project         = var.project_id
+  region          = var.region
+  request_timeout = "120s"
 }
 
 data "google_project" "current" {

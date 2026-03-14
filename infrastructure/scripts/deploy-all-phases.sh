@@ -72,7 +72,7 @@ tf_apply() {
   local dir="$1"
   shift
   echo "  terraform init..."
-  terraform -chdir="${dir}" init -input=false -no-color > /dev/null 2>&1
+  terraform -chdir="${dir}" init -input=false -no-color
   echo "  terraform apply..."
   terraform -chdir="${dir}" apply -auto-approve -input=false "$@"
 }

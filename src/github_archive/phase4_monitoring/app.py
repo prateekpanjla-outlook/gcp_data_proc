@@ -25,10 +25,14 @@ def _run_query(query_name: str) -> list[dict]:
     """Load and run a SQL query file, return rows as list of dicts."""
     query_path = os.path.join(os.path.dirname(__file__), 'queries', f'{query_name}.sql')
     with open(query_path) as f:
-        sql = f.read().replace('PROJECT_ID', PROJECT_ID)
+        sql = f.read().replace('PROJECT_ID', PROJECT_ID).replace('DATASET_ID', DATASET_ID)
 
-    rows = bq_client.query(sql).result()
-    return [dict(row) for row in rows]
+    try:
+        rows = bq_client.query(sql).result()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        logger.warning("Query '%s' failed (table may not exist yet): %s", query_name, e)
+        return []
 
 
 @app.route('/')
@@ -37,6 +41,13 @@ def dashboard():
     daily = _run_query('daily_throughput')
     errors = _run_query('pipeline_errors')
     return render_template('dashboard.html', daily=daily, errors=errors)
+
+
+@app.route('/phase1')
+def phase1_detail():
+    """Phase 1 download detail."""
+    downloads = _run_query('phase1_download_summary')
+    return render_template('phase1.html', downloads=downloads)
 
 
 @app.route('/phase2')

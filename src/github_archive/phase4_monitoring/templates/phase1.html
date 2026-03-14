@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Phase 2 Processing Detail</title>
+    <title>Phase 1 Download Detail</title>
     <style>
         body { font-family: monospace; margin: 2rem; background: #1a1a2e; color: #e0e0e0; }
         h1 { color: #00d4ff; }
@@ -10,7 +10,6 @@
         th, td { border: 1px solid #333; padding: 8px 12px; text-align: left; }
         th { background: #16213e; color: #00d4ff; }
         tr:nth-child(even) { background: #0f3460; }
-        .error { color: #ff6b6b; }
         .nav { margin-bottom: 2rem; }
         .nav a { margin-right: 1.5rem; }
         .arch { display: flex; align-items: center; gap: 0; margin: 1.5rem 0; flex-wrap: wrap; }
@@ -23,7 +22,7 @@
     </style>
 </head>
 <body>
-    <h1>Phase 2: Processing Detail</h1>
+    <h1>Phase 1: Download Detail</h1>
     <div class="nav">
         <a href="/">Overview</a>
         <a href="/phase1">Phase 1 Detail</a>
@@ -32,33 +31,27 @@
     </div>
 
     <div class="arch">
-        <div class="arch-box"><div class="label">GCS Landing</div><div class="name">*.json.gz</div></div>
+        <div class="arch-box active"><div class="label">Cloud Scheduler</div><div class="name">hourly trigger</div></div>
         <div class="arch-arrow">&#x2192;</div>
-        <div class="arch-box active"><div class="label">Eventarc</div><div class="name">storage trigger</div></div>
+        <div class="arch-box active"><div class="label">Cloud Run Job</div><div class="name">download.sh</div></div>
         <div class="arch-arrow">&#x2192;</div>
-        <div class="arch-box active"><div class="label">Cloud Run Service</div><div class="name">file_processor</div></div>
-        <div class="arch-arrow">&#x2192;</div>
-        <div class="arch-box active"><div class="label">GCS Staging</div><div class="name">*.ndjson.gz</div></div>
+        <div class="arch-box active"><div class="label">GCS Landing</div><div class="name">*.json.gz</div></div>
     </div>
 
     <table>
         <tr>
             <th>Date</th>
-            <th>File</th>
-            <th>Records In</th>
-            <th>Records Out</th>
-            <th>Errors</th>
-            <th>Duration (s)</th>
+            <th>File Name</th>
+            <th>Size (MB)</th>
+            <th>Size (bytes)</th>
             <th>Timestamp (IST)</th>
         </tr>
-        {% for row in files %}
+        {% for row in downloads %}
         <tr>
-            <td>{{ row.processing_date }}</td>
+            <td>{{ row.download_date }}</td>
             <td>{{ row.file_name }}</td>
-            <td>{{ row.records_in }}</td>
-            <td>{{ row.records_out }}</td>
-            <td class="{{ 'error' if row.errors > 0 else '' }}">{{ row.errors }}</td>
-            <td>{{ row.duration_seconds }}</td>
+            <td>{{ row.file_size_mb }}</td>
+            <td>{{ row.file_size_bytes }}</td>
             <td>{{ row.timestamp_ist }}</td>
         </tr>
         {% endfor %}

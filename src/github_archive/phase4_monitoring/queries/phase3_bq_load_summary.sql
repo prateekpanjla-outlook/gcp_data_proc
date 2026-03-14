@@ -1,29 +1,24 @@
--- Phase 3 BQ load summary: rows loaded per file, failures
--- Parses unstructured f-string logs from phase3 main.py:
---   "Loaded {rows} rows"
---   "Processing event: bucket={bucket}, file={file}, size={size}"
---   "Failed to load {gcs_uri}: {error}"
+-- Phase 3 BQ load summary: load jobs + row counts per day
+-- Combines INFORMATION_SCHEMA.JOBS for job metadata with github_events row counts
 
--- Successful loads
 SELECT
-    DATE(timestamp) AS load_date,
-    REGEXP_EXTRACT(textPayload, r'file=([^,]+),') AS file_name,
-    CAST(REGEXP_EXTRACT(textPayload, r'Loaded (\d+) rows') AS INT64) AS rows_loaded,
-    'success' AS status,
-    timestamp
-FROM `PROJECT_ID.pipeline_logs.cloudfunctions_googleapis_com_cloud_functions`
-WHERE textPayload LIKE '%Loaded%rows%'
-
-UNION ALL
-
--- Failed loads
-SELECT
-    DATE(timestamp) AS load_date,
-    REGEXP_EXTRACT(textPayload, r'Failed to load gs://[^/]+/(.+):') AS file_name,
-    0 AS rows_loaded,
-    'failed' AS status,
-    timestamp
-FROM `PROJECT_ID.pipeline_logs.cloudfunctions_googleapis_com_cloud_functions`
-WHERE textPayload LIKE '%Failed to load%'
-
-ORDER BY timestamp DESC
+    DATE(j.creation_time, 'Asia/Kolkata') AS load_date,
+    j.job_type,
+    j.job_id,
+    CASE j.state
+        WHEN 'DONE' THEN IF(j.error_result IS NULL, 'success', 'failed')
+        ELSE j.state
+    END AS status,
+    r.rows_loaded,
+    DATETIME(j.creation_time, 'Asia/Kolkata') AS timestamp_ist
+FROM `region-us-central1`.INFORMATION_SCHEMA.JOBS j
+LEFT JOIN (
+    SELECT DATE(created_at) AS event_date, COUNT(*) AS rows_loaded
+    FROM `PROJECT_ID.github_archive.github_events`
+    GROUP BY event_date
+) r ON r.event_date = DATE(j.creation_time)
+WHERE
+    j.job_type = 'LOAD'
+    AND j.destination_table.table_id = 'github_events'
+ORDER BY j.creation_time DESC
+LIMIT 50
