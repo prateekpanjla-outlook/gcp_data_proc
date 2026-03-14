@@ -1,0 +1,70 @@
+name: Deploy & Verify GitHub Archive Pipeline
+
+on:
+  push:
+    branches:
+      - gh_archive_test
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: us-central1
+  ENVIRONMENT: test
+
+jobs:
+  deploy-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Decode GCP credentials
+        run: |
+          echo "${{ secrets.GCP_SA_KEY_BASE64 }}" | base64 -d > /tmp/gcp-key.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-key.json" >> $GITHUB_ENV
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY_BASE64 }}
+          export_environment_variables: false
+
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5"
+          terraform_wrapper: false
+
+      - name: Activate service account
+        run: |
+          gcloud auth activate-service-account --key-file=/tmp/gcp-key.json
+
+      - name: Deploy all phases
+        run: |
+          chmod +x infrastructure/scripts/deploy-all-phases.sh
+          ./infrastructure/scripts/deploy-all-phases.sh "$PROJECT_ID" "$ENVIRONMENT" "$REGION"
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-key.json
+
+      - name: Run verification tests
+        run: |
+          chmod +x infrastructure/scripts/ci-verify-tests.sh
+          ./infrastructure/scripts/ci-verify-tests.sh "$PROJECT_ID" "$ENVIRONMENT" "$REGION"
+
+      - name: Print dashboard URL
+        if: always()
+        run: |
+          URL=$(gcloud run services describe "${ENVIRONMENT}-github-archive-dashboard" \
+            --project="$PROJECT_ID" --region="$REGION" --format="value(status.url)" 2>/dev/null || echo "N/A")
+          echo "## Dashboard URL" >> $GITHUB_STEP_SUMMARY
+          echo "[$URL]($URL)" >> $GITHUB_STEP_SUMMARY
+          echo ""
+          echo "Dashboard: $URL"
+
+      - name: Cleanup credentials
+        if: always()
+        run: rm -f /tmp/gcp-key.json

@@ -38,19 +38,15 @@ resource "null_resource" "build_dashboard_image" {
   }
 
   provisioner "local-exec" {
-    command = format(
-      "gcloud auth activate-service-account --key-file=%s; gcloud builds submit %s --tag=%s-docker.pkg.dev/%s/%s/pipeline-dashboard:latest --project=%s --service-account=projects/%s/serviceAccounts/%s-cloud-build@%s.iam.gserviceaccount.com --default-buckets-behavior=REGIONAL_USER_OWNED_BUCKET",
-      var.deployer_sa_key_path,
-      "${path.module}/../../../../../../src/github_archive/phase4_monitoring",
-      var.region,
-      var.project_id,
-      var.artifact_registry_repo,
-      var.project_id,
-      var.project_id,
-      var.environment,
-      var.project_id
-    )
-    interpreter = ["powershell", "-Command"]
+    command     = <<-SCRIPT
+      gcloud auth activate-service-account --key-file=${var.deployer_sa_key_path} || exit 1
+      gcloud builds submit ${path.module}/../../../../../../src/github_archive/phase4_monitoring \
+        --tag=${var.region}-docker.pkg.dev/${var.project_id}/${var.artifact_registry_repo}/pipeline-dashboard:latest \
+        --project=${var.project_id} \
+        --service-account=projects/${var.project_id}/serviceAccounts/${var.environment}-cloud-build@${var.project_id}.iam.gserviceaccount.com \
+        --default-buckets-behavior=REGIONAL_USER_OWNED_BUCKET
+    SCRIPT
+    interpreter = ["bash", "-c"]
   }
 }
 

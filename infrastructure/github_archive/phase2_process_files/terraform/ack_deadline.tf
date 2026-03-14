@@ -11,15 +11,14 @@ resource "null_resource" "update_trigger_ack_deadline" {
   }
 
   provisioner "local-exec" {
-    command = format(
-      "gcloud auth activate-service-account --key-file=%s; $sub = (gcloud eventarc triggers describe %s --location %s --project=%s --format='value(transport.pubsub.subscription)'); gcloud pubsub subscriptions update $sub --ack-deadline=600 --project=%s",
-      var.deployer_sa_key_path,
-      google_eventarc_trigger.main_file_processor.name,
-      var.region,
-      var.project_id,
-      var.project_id
-    )
-
-    interpreter = ["powershell", "-Command"]
+    command     = <<-SCRIPT
+      gcloud auth activate-service-account --key-file=${var.deployer_sa_key_path} || exit 1
+      SUB=$(gcloud eventarc triggers describe ${google_eventarc_trigger.main_file_processor.name} \
+        --location ${var.region} \
+        --project=${var.project_id} \
+        --format='value(transport.pubsub.subscription)')
+      gcloud pubsub subscriptions update "$SUB" --ack-deadline=600 --project=${var.project_id}
+    SCRIPT
+    interpreter = ["bash", "-c"]
   }
 }
