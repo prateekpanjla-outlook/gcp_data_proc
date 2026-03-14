@@ -86,6 +86,113 @@ backend "gcs" {
 | `GCP_PROJECT_ID` | `beaming-glyph-489707-b8` | Test project ID |
 | `GCP_SA_KEY_BASE64` | `base64 -w0 key.json` | Base64-encoded SA key (3212 bytes) |
 
+## GitHub Actions Concurrency Control — Deep Dive
+
+### What it does
+
+```yaml
+concurrency:
+  group: gh-archive-deploy-${{ github.ref }}
+  cancel-in-progress: true
+```
+
+This tells GitHub Actions: "Only one workflow run from this `group` can be active at a time."
+
+### How it works
+
+1. **Group key**: `gh-archive-deploy-${{ github.ref }}` — `github.ref` is the branch name (e.g., `refs/heads/gh_archive_test`). So all pushes to the same branch share the same concurrency group.
+
+2. **When a new push arrives while a run is active**:
+   - GitHub sees the new run belongs to the same concurrency group
+   - `cancel-in-progress: true` → GitHub **cancels the currently running** workflow and starts the new one
+   - Without `cancel-in-progress`, the new run would **queue** and wait for the old one to finish
+
+3. **Why cancel the old run** (not queue):
+   - The old run is deploying infrastructure based on **old code** — the new push has fixes/changes that supersede it
+   - Terraform state locks would block the new run if the old one is still holding them
+   - Saves CI minutes (free tier: 2,000 min/month) — no point running stale code
+   - The old run's partial deploy is idempotent — the new run will pick up where it left off (terraform detects existing resources)
+
+4. **What happens to the cancelled run**:
+   - GitHub sends SIGTERM to all running processes
+   - The run shows as "cancelled" (grey icon) in the Actions tab
+   - Any terraform apply that was mid-execution gets interrupted — but terraform state is consistent because GCS backend uses locking (writes are atomic)
+   - Resources created before cancellation stay deployed — the new run will detect them via state
+
+### When NOT to use `cancel-in-progress`
+
+- **Destroy workflows**: Never cancel a destroy mid-way — could leave partial state. Our destroy workflow doesn't use concurrency control.
+- **Prod deployments**: May want to queue instead of cancel, to avoid interrupting a live deployment.
+
+### Alternative: Queue instead of cancel
+
+```yaml
+concurrency:
+  group: gh-archive-deploy-${{ github.ref }}
+  cancel-in-progress: false  # default
+```
+
+This queues the new run until the old one finishes. Safer but slower — and wastes CI minutes if the old run is deploying outdated code.
+
+## Terraform null_resource — Phantom Additions/Deletions
+
+**Observation**: Terraform output shows `1 added, 0 changed, 1 destroyed` even when no real GCP infrastructure changed. This can be confusing in CI logs.
+
+**Why it happens**: `null_resource` has no real GCP resource — it only exists as an ID in terraform state. When its `triggers` value changes, terraform "destroys" the old state entry and "creates" a new one (re-running the provisioner script). The `always_run = timestamp()` trigger guarantees this happens every apply.
+
+**What "1 added, 1 destroyed" actually means**:
+- Destroyed: removed old state entry (no GCP API call)
+- Added: ran the script, recorded new state ID (no GCP resource created)
+- Net effect on GCP: zero changes
+
+**Where you'll see this**:
+- `cleanup_stale_sa_bindings` (Phase 4 Layer 02) — always re-runs stale SA check
+- `verify_dashboard_iam` (Phase 4 Layer 02) — always re-runs IAM verification
+- Any `null_resource` with `triggers = { always_run = timestamp() }`
+
+**How to distinguish from real changes**: Look at the resource type in the plan output. If it's `null_resource.*`, no GCP infrastructure is changing. Real changes show as `google_*` resources.
+
+## Issue 8: schema.json not in git (gitignored by *.json)
+
+**Problem**: Phase 3 Layer 01 terraform failed with `no file exists at "./schema.json"`. The `*.json` rule in `.gitignore` excluded all JSON files including the BQ table schema definition.
+
+**Fix**: Added exceptions to `.gitignore`:
+```
+!**/schema.json
+!**/.terraform.lock.hcl
+```
+
+## Issue 9: Terraform state lock conflict from parallel runs
+
+**Problem**: Multiple pushes triggered parallel workflow runs. Both tried to acquire the same GCS state lock → second run failed with lock conflict.
+
+**Fix**: Added `concurrency` control to the workflow:
+```yaml
+concurrency:
+  group: gh-archive-deploy-${{ github.ref }}
+  cancel-in-progress: true
+```
+This cancels the older run when a new push arrives.
+
+## Issue 10: `data.terraform_remote_state` still using local backend
+
+**Problem**: After switching terraform `backend` blocks to GCS, the `data.terraform_remote_state` references in Phase 2 Layer 03 and Phase 3 Layers 02/03 still pointed to `backend = "local"` with `path = "../01_static/terraform.tfstate"`. The local state file doesn't exist on the GitHub runner.
+
+**Fix**: Updated all `data.terraform_remote_state` blocks to use GCS:
+```hcl
+data "terraform_remote_state" "static" {
+  backend = "gcs"
+  config = {
+    bucket = "beaming-glyph-489707-b8-terraform-state"
+    prefix = "terraform/state/phase3-static"
+  }
+}
+```
+Affected files:
+- `phase2_process_files/terraform/layers/03_operational/main.tf` (2 references)
+- `phase3_loadbigquery/terraform/layers/02_first_time/main.tf` (1 reference)
+- `phase3_loadbigquery/terraform/layers/03_operational/main.tf` (2 references)
+
 ## GitHub Runner Environment
 
 - OS: Ubuntu (latest)
