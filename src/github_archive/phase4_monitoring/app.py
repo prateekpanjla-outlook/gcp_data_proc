@@ -64,6 +64,15 @@ def phase3_detail():
     return render_template('phase3.html', loads=loads)
 
 
+@app.route('/elt')
+def elt_analytics():
+    """ELT analytics — materialized view, scheduled query, Dataform views."""
+    repos = _run_query('elt_repo_stats')
+    developers = _run_query('elt_developer_activity')
+    bot_human = _run_query('elt_bot_vs_human')
+    return render_template('elt.html', repos=repos, developers=developers, bot_human=bot_human)
+
+
 @app.route('/infra')
 def infrastructure():
     """Terraform infrastructure overview."""

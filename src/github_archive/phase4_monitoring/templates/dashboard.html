@@ -20,6 +20,8 @@
         .arch-box .label { color: #00d4ff; font-size: 0.85em; }
         .arch-box .name { color: #e0e0e0; font-size: 0.75em; margin-top: 4px; }
         .arch-arrow { color: #7b68ee; font-size: 1.5em; padding: 0 8px; }
+        .arch-box.elt { border-color: #ffd93d; }
+        .arch-box.elt .label { color: #ffd93d; }
     </style>
 </head>
 <body>
@@ -29,6 +31,7 @@
         <a href="/phase1">Phase 1 Detail</a>
         <a href="/phase2">Phase 2 Detail</a>
         <a href="/phase3">Phase 3 Detail</a>
+        <a href="/elt">ELT Analytics</a>
         <a href="/infra">Infrastructure</a>
         <a href="/service-accounts">Service Accounts</a>
     </div>
@@ -47,6 +50,8 @@
         <div class="arch-box"><div class="label">Cloud Function</div><div class="name">bq-loader</div></div>
         <div class="arch-arrow">&#x2192;</div>
         <div class="arch-box"><div class="label">BigQuery</div><div class="name">github_events</div></div>
+        <div class="arch-arrow">&#x2192;</div>
+        <div class="arch-box elt"><div class="label">ELT</div><div class="name">views + MV + scheduled</div></div>
     </div>
 
     <h2>Daily Throughput</h2>

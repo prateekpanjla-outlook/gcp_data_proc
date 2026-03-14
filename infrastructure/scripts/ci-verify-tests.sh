@@ -258,7 +258,7 @@ if [ -z "${DASHBOARD_URL}" ]; then
 fi
 
 if [ -n "${DASHBOARD_URL}" ]; then
-  for endpoint in "/health" "/" "/phase1" "/phase2" "/phase3" "/infra" "/service-accounts"; do
+  for endpoint in "/health" "/" "/phase1" "/phase2" "/phase3" "/elt" "/infra" "/service-accounts"; do
     STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${DASHBOARD_URL}${endpoint}" 2>/dev/null || echo "000")
     if [ "${STATUS}" = "200" ]; then
       pass "Dashboard ${endpoint} → HTTP ${STATUS}"
@@ -316,6 +316,59 @@ if [ "${BQ_LOADED}" = "true" ]; then
   fi
 else
   fail "Skipping data integrity — no BQ data"
+fi
+
+echo ""
+
+# =============================================================================
+# Test 7: ELT Views and Materialized View
+# =============================================================================
+echo "========================================="
+echo "Test 7: ELT Transformations"
+echo "========================================="
+
+if [ "${BQ_LOADED}" = "true" ]; then
+  # Materialized view: mv_repo_daily_stats
+  MV_COUNT=$(bq query --project_id="${PROJECT_ID}" --nouse_legacy_sql --format=csv --quiet \
+    "SELECT COUNT(*) FROM \`${PROJECT_ID}.github_archive.mv_repo_daily_stats\`" \
+    2>/dev/null | tail -1 || echo "0")
+  if [ "${MV_COUNT}" -gt 0 ] 2>/dev/null; then
+    pass "Materialized view mv_repo_daily_stats: ${MV_COUNT} rows"
+  else
+    fail "Materialized view mv_repo_daily_stats is empty"
+  fi
+
+  # Staging view: stg_events (deduplicated)
+  STG_COUNT=$(bq query --project_id="${PROJECT_ID}" --nouse_legacy_sql --format=csv --quiet \
+    "SELECT COUNT(*) FROM \`${PROJECT_ID}.github_archive.stg_events\` LIMIT 1" \
+    2>/dev/null | tail -1 || echo "0")
+  if [ "${STG_COUNT}" -gt 0 ] 2>/dev/null; then
+    pass "Staging view stg_events: ${STG_COUNT} rows"
+  else
+    fail "Staging view stg_events is empty"
+  fi
+
+  # Mart view: developer_daily_activity
+  DEV_COUNT=$(bq query --project_id="${PROJECT_ID}" --nouse_legacy_sql --format=csv --quiet \
+    "SELECT COUNT(*) FROM \`${PROJECT_ID}.github_archive.developer_daily_activity\`" \
+    2>/dev/null | tail -1 || echo "0")
+  if [ "${DEV_COUNT}" -gt 0 ] 2>/dev/null; then
+    pass "Mart view developer_daily_activity: ${DEV_COUNT} rows"
+  else
+    fail "Mart view developer_daily_activity is empty"
+  fi
+
+  # Mart view: bot_vs_human_activity
+  BOT_ROWS=$(bq query --project_id="${PROJECT_ID}" --nouse_legacy_sql --format=csv --quiet \
+    "SELECT COUNT(*) FROM \`${PROJECT_ID}.github_archive.bot_vs_human_activity\`" \
+    2>/dev/null | tail -1 || echo "0")
+  if [ "${BOT_ROWS}" -ge 2 ] 2>/dev/null; then
+    pass "Mart view bot_vs_human_activity: ${BOT_ROWS} rows (bot + human)"
+  else
+    fail "Mart view bot_vs_human_activity: expected >= 2 rows, got ${BOT_ROWS}"
+  fi
+else
+  fail "Skipping ELT tests — no BQ data"
 fi
 
 echo ""
