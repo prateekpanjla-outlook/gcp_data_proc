@@ -14,16 +14,18 @@
 # Data Sources - Remote State
 # =============================================================================
 data "terraform_remote_state" "static" {
-  backend = "local"
+  backend = "gcs"
   config = {
-    path = "../01_static/terraform.tfstate"
+    bucket = "beaming-glyph-489707-b8-terraform-state"
+    prefix = "terraform/state/phase3-static"
   }
 }
 
 data "terraform_remote_state" "first_time" {
-  backend = "local"
+  backend = "gcs"
   config = {
-    path = "../02_first_time/terraform.tfstate"
+    bucket = "beaming-glyph-489707-b8-terraform-state"
+    prefix = "terraform/state/phase3-first-time"
   }
 }
 

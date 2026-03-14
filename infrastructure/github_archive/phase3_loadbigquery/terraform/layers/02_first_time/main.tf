@@ -9,9 +9,10 @@
 # Data Sources - Remote State from Layer 01
 # =============================================================================
 data "terraform_remote_state" "static" {
-  backend = "local"
+  backend = "gcs"
   config = {
-    path = "../01_static/terraform.tfstate"
+    bucket = "beaming-glyph-489707-b8-terraform-state"
+    prefix = "terraform/state/phase3-static"
   }
 }
 
