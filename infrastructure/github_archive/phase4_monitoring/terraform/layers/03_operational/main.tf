@@ -76,6 +76,9 @@ resource "google_cloud_run_v2_service" "dashboard" {
           cpu    = "1"
           memory = "512Mi"
         }
+        # cpu_idle = true → request-based billing (CPU throttled when idle)
+        # Dashboard is accessed infrequently, cold start acceptable
+        cpu_idle = true
       }
     }
 

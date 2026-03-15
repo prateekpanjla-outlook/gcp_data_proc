@@ -116,9 +116,10 @@ resource "google_cloud_run_v2_service" "processor" {
           cpu    = tostring(var.processor_cpu)
           memory = "${var.processor_memory}Gi"
         }
-        # Note: 'requests' not supported in Cloud Run v2
-        # CPU allocated for entire request duration for memory-intensive JSON processing
-        cpu_idle = false
+        # cpu_idle = true → request-based billing (CPU throttled when idle)
+        # Saves ~₹1,400/month vs instance-based (cpu_idle = false)
+        # Trade-off: 2-5 second cold start on first request after idle
+        cpu_idle = true
       }
     }
 

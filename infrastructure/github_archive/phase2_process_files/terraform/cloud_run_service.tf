@@ -62,8 +62,10 @@ resource "google_cloud_run_v2_service" "processor" {
           cpu    = "2"
           memory = "4Gi"
         }
-        # v2: cpu_idle replaces requests block
-        cpu_idle = false
+        # cpu_idle = true → request-based billing (CPU throttled when idle)
+        # Saves ~₹1,400/month vs instance-based (cpu_idle = false)
+        # Trade-off: 2-5 second cold start on first request after idle
+        cpu_idle = true
       }
     }
   }
