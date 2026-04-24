@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IAM Permissions and Dependency Flow</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            background: #f5f5f5;
+            overflow: hidden;
+        }
+
+        #controls {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+
+        #controls button {
+            display: block;
+            width: 100%;
+            margin: 5px 0;
+            padding: 8px 16px;
+            border: none;
+            background: #4285f4;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        #controls button:hover {
+            background: #3367d6;
+        }
+
+        #graph-container {
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            cursor: grab;
+        }
+
+        #graph-container:active {
+            cursor: grabbing;
+        }
+
+        .legend {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            z-index: 1000;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            margin-right: 8px;
+            border-radius: 4px;
+        }
+
+        .node rect {
+            stroke-width: 2px;
+            stroke: #666;
+            rx: 5;
+            ry: 5;
+        }
+
+        .node text {
+            font-size: 10px;
+            font-family: Arial, sans-serif;
+        }
+
+        .node:hover rect {
+            stroke: #4285f4;
+            stroke-width: 3px;
+            cursor: pointer;
+        }
+
+        .cluster rect {
+            stroke-width: 2px;
+            rx: 10;
+            ry: 10;
+            opacity: 0.2;
+        }
+
+        .cluster text {
+            font-size: 13px;
+            font-weight: bold;
+            font-family: Arial, sans-serif;
+        }
+
+        .edge path {
+            stroke: #999;
+            stroke-width: 1.5px;
+            fill: none;
+        }
+
+        .edge text {
+            font-size: 8px;
+            font-family: Arial, sans-serif;
+            fill: #666;
+        }
+
+        .edge:hover path {
+            stroke: #4285f4;
+            stroke-width: 2px;
+        }
+
+        .permission-box {
+            font-size: 9px;
+            fill: #d32f2f;
+            font-weight: bold;
+        }
+
+        .dependency-label {
+            font-size: 9px;
+            fill: #ff6f00;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <button onclick="zoomIn()">Zoom In (+)</button>
+        <button onclick="zoomOut()">Zoom Out (-)</button>
+        <button onclick="resetZoom()">Reset View</button>
+        <button onclick="fitToScreen()">Fit to Screen</button>
+    </div>
+
+    <div class="legend">
+        <h3 style="margin: 0 0 10px 0; font-size: 14px;">Legend</h3>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #e3f2fd;"></div>
+            <span>Provision-Time</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #fff3e0;"></div>
+            <span>Build-Time</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #e1f5ff;"></div>
+            <span>Phase 1: Ingestion</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #fff4e1;"></div>
+            <span>Phase 2: Processing</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #e8f5e9;"></div>
+            <span>Phase 3: Loading</span>
+        </div>
+        <hr style="margin: 10px 0;">
+        <div class="legend-item">
+            <div class="legend-color" style="border: 2px solid #d32f2f;"></div>
+            <span>Required Permissions</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="border: 2px solid #ff6f00;"></div>
+            <span>Resource Dependencies</span>
+        </div>
+    </div>
+
+    <div id="graph-container"></div>
+
+    <script>
+        let zoom;
+        let svg;
+        let g;
+
+        // Graph data structure with permissions and dependencies
+        const graphData = {
+            nodes: [
+                // Provision-Time
+                {
+                    id: 'terraform-sa',
+                    label: 'Terraform Deployer SA',
+                    cluster: 'provision',
+                    x: 120, y: 100,
+                    color: '#bbdefb',
+                    file: 'infrastructure/terraform/main.tf',
+                    permissions: 'Owner or Editor\n+ Service Account Admin'
+                },
+                {
+                    id: 'terraform-roles',
+                    label: 'Provision-Time Roles\n• resourcemanager.projectIamAdmin\n• iam.serviceAccountAdmin\n• iam.serviceAccountTokenCreator\n• run.admin\n• storage.admin\n• bigquery.admin\n• cloudscheduler.admin\n• artifactregistry.admin\n• pubsub.admin\n• cloudfunctions.admin\n• eventarc.admin\n• monitoring.admin\n• logging.admin\n• cloudbuild.builds.builder',
+                    cluster: 'provision',
+                    x: 120, y: 280,
+                    color: '#e3f2fd',
+                    dashed: true,
+                    file: 'infrastructure/terraform/environments/local/main.tf'
+                },
+
+                // Build-Time
+                {
+                    id: 'cloudbuild-sa',
+                    label: 'Cloud Build SA\n(PROJECT_NUM@cloudbuild...)',
+                    cluster: 'build',
+                    x: 380, y: 100,
+                    color: '#ffe0b2',
+                    file: 'infrastructure/github_archive/phase1_ingestion/terraform/cloudbuild.tf',
+                    permissions: 'roles/cloudbuild.builds.editor\nroles/storage.objectAdmin\nroles/artifactregistry.writer\nroles/run.admin\nroles/iam.serviceAccountUser\nroles/logging.logWriter'
+                },
+                {
+                    id: 'cloudbuild-roles',
+                    label: 'Build-Time Permissions\n✓ Build containers\n✓ Push to Artifact Registry\n✓ Deploy to Cloud Run\n✓ Write logs',
+                    cluster: 'build',
+                    x: 380, y: 280,
+                    color: '#fff3e0',
+                    dashed: true,
+                    file: 'infrastructure/github_archive/phase1_ingestion/terraform/cloudbuild.tf'
+                },
+
+                // Phase 1
+                {
+                    id: 'p1-scheduler',
+                    label: 'Cloud Scheduler',
+                    cluster: 'phase1',
+                    x: 640, y: 60,
+                    color: '#b3e5fc',
+                    file: 'infrastructure/github_archive/phase1_ingestion/terraform/scheduler.tf',
+                    permissions: 'roles/cloudscheduler.admin',
+                    dependsOn: 'Cloud Run Job must exist'
+                },
+                {
+                    id: 'p1-job',
+                    label: 'Cloud Run Job\n(Downloader)',
+                    cluster: 'phase1',
+                    x: 640, y: 180,
+                    color: '#b3e5fc',
+                    file: 'infrastructure/github_archive/phase1_ingestion/terraform/cloud_run_jobs.tf',
+                    permissions: 'Service Account:\nroles/iam.serviceAccountUser',
+                    dependsOn: 'Downloader SA\nLanding Bucket'
+                },
+                {
+                    id: 'p1-bucket',
+                    label: 'GCS Landing Bucket\n(6-day retention)',
+                    cluster: 'phase1',
+                    x: 640, y: 300,
+                    color: '#b3e5fc',
+                    file: 'infrastructure/github_archive/phase1_ingestion/terraform/storage.tf',
+                    dependsOn: 'Must exist before\nEventarc triggers'
+                },
+                {
+                    id: 'p1-sa',
+                    label: 'Downloader SA',
+                    cluster: 'phase1',
+                    x: 640, y: 420,
+                    color: '#fce4ec',
+                    dashed: true,
+                    file: 'infrastructure/github_archive/phase1_ingestion/terraform/service_accounts.tf',
+                    permissions: 'roles/storage.objectCreator\non Landing Bucket'
+                },
+
+                // Phase 2
+                {
+                    id: 'p2-event',
+                    label: 'GCS Event\n(File Upload)',
+                    cluster: 'phase2',
+                    x: 900, y: 50,
+                    color: '#ffe0b2',
+                    ellipse: true
+                },
+                {
+                    id: 'p2-storage',
+                    label: 'Storage Service Agent\n(service-PROJECT@gcp-sa-storage.iam)',
+                    cluster: 'phase2',
+                    x: 900, y: 150,
+                    color: '#e8f5e9',
+                    dashed: true,
+                    permissions: 'roles/pubsub.publisher\non Pub/Sub topic'
+                },
+                {
+                    id: 'p2-pubsub',
+                    label: 'Pub/Sub Service Agent\n(service-PROJECT@gcp-sa-pubsub.iam)',
+                    cluster: 'phase2',
+                    x: 900, y: 250,
+                    color: '#e8f5e9',
+                    dashed: true,
+                    permissions: 'roles/iam.serviceAccountTokenCreator\non Eventarc Invoker SA'
+                },
+                {
+                    id: 'p2-invoker',
+                    label: 'Eventarc Invoker SA\n(processor-eventarc-invoker)',
+                    cluster: 'phase2',
+                    x: 900, y: 350,
+                    color: '#fce4ec',
+                    file: 'infrastructure/github_archive/phase2_process_files/terraform/service_accounts.tf',
+                    permissions: 'roles/run.invoker\non Processor Service'
+                },
+                {
+                    id: 'p2-service',
+                    label: 'Cloud Run Service\n(Processor)\n4GiB, 2 CPU',
+                    cluster: 'phase2',
+                    x: 900, y: 460,
+                    color: '#fff4e1',
+                    file: 'infrastructure/github_archive/phase2_process_files/terraform/cloud_run_service.tf',
+                    permissions: 'Service Account:\nroles/iam.serviceAccountUser',
+                    dependsOn: 'Processor SA\nStaging Bucket\nContainer Image'
+                },
+                {
+                    id: 'p2-bucket',
+                    label: 'GCS Staging Bucket\n(30-day retention)',
+                    cluster: 'phase2',
+                    x: 900, y: 580,
+                    color: '#fff4e1',
+                    file: 'infrastructure/github_archive/phase2_process_files/terraform/storage.tf',
+                    dependsOn: 'Must exist before\nPhase 3 Eventarc'
+                },
+                {
+                    id: 'p2-processor-sa',
+                    label: 'Processor SA',
+                    cluster: 'phase2',
+                    x: 900, y: 690,
+                    color: '#fce4ec',
+                    dashed: true,
+                    file: 'infrastructure/github_archive/phase2_process_files/terraform/service_accounts.tf',
+                    permissions: 'roles/storage.objectAdmin\non Staging Bucket\nroles/storage.objectViewer\non Landing Bucket'
+                },
+
+                // Phase 3
+                {
+                    id: 'p3-event',
+                    label: 'GCS Event\n(File Upload)',
+                    cluster: 'phase3',
+                    x: 1160, y: 50,
+                    color: '#c8e6c9',
+                    ellipse: true
+                },
+                {
+                    id: 'p3-storage',
+                    label: 'Storage Service Agent\n(service-PROJECT@gcp-sa-storage.iam)',
+                    cluster: 'phase3',
+                    x: 1160, y: 150,
+                    color: '#e8f5e9',
+                    dashed: true,
+                    permissions: 'roles/pubsub.publisher\non Pub/Sub topic'
+                },
+                {
+                    id: 'p3-pubsub',
+                    label: 'Pub/Sub Service Agent\n(service-PROJECT@gcp-sa-pubsub.iam)',
+                    cluster: 'phase3',
+                    x: 1160, y: 250,
+                    color: '#e8f5e9',
+                    dashed: true,
+                    permissions: 'roles/iam.serviceAccountTokenCreator\non Eventarc Invoker SA'
+                },
+                {
+                    id: 'p3-invoker',
+                    label: 'Eventarc Invoker SA\n(bq-loader-eventarc-invoker)',
+                    cluster: 'phase3',
+                    x: 1160, y: 350,
+                    color: '#fce4ec',
+                    file: 'infrastructure/github_archive/phase3_loadbigquery/terraform/layers/01_static/main.tf',
+                    permissions: 'roles/cloudfunctions.invoker\non BQ Loader Function'
+                },
+                {
+                    id: 'p3-function',
+                    label: 'Cloud Function\n(BQ Loader)\nPython 3.11',
+                    cluster: 'phase3',
+                    x: 1160, y: 460,
+                    color: '#e8f5e9',
+                    file: 'src/github_archive/phase3_loadbigquery/main.py',
+                    permissions: 'Service Account:\nroles/iam.serviceAccountUser',
+                    dependsOn: 'BQ Loader SA\nBigQuery Table\nSource Code Zip'
+                },
+                {
+                    id: 'p3-bq',
+                    label: 'BigQuery Table\n(Partitioned by date)',
+                    cluster: 'phase3',
+                    x: 1160, y: 580,
+                    color: '#e8f5e9',
+                    file: 'infrastructure/github_archive/phase3_loadbigquery/terraform/layers/01_static/main.tf',
+                    dependsOn: 'BigQuery Dataset'
+                },
+                {
+                    id: 'p3-loader-sa',
+                    label: 'BQ Loader SA',
+                    cluster: 'phase3',
+                    x: 1160, y: 690,
+                    color: '#fce4ec',
+                    dashed: true,
+                    file: 'infrastructure/github_archive/phase3_loadbigquery/terraform/layers/01_static/main.tf',
+                    permissions: 'roles/bigquery.dataEditor\non BigQuery Table\nroles/storage.objectViewer\non Staging Bucket'
+                },
+            ],
+            edges: [
+                // Provision-Time
+                { source: 'terraform-sa', target: 'terraform-roles', label: 'Needs roles', color: '#1976d2', bold: true },
+
+                // Build-Time
+                { source: 'cloudbuild-sa', target: 'cloudbuild-roles', label: 'Needs', color: '#f57c00', bold: true },
+
+                // Phase 1
+                { source: 'p1-scheduler', target: 'p1-job', label: 'Triggers\n(as scheduler SA)' },
+                { source: 'p1-job', target: 'p1-bucket', label: 'Writes to\n(as downloader SA)' },
+                { source: 'p1-job', target: 'p1-sa', label: 'Uses', dashed: true },
+                { source: 'p1-sa', target: 'p1-bucket', label: 'Has permission\nto write', color: '#d32f2f', dashed: true },
+
+                // Phase 2
+                { source: 'p2-event', target: 'p2-storage', label: 'Triggers' },
+                { source: 'p2-storage', target: 'p2-pubsub', label: 'Publishes\nevent' },
+                { source: 'p2-pubsub', target: 'p2-invoker', label: 'Impersonates\n(generates token)', color: '#d32f2f', bold: true },
+                { source: 'p2-invoker', target: 'p2-service', label: 'Invokes\n(with auth token)' },
+                { source: 'p2-service', target: 'p2-bucket', label: 'Writes to\n(as processor SA)' },
+                { source: 'p2-service', target: 'p2-processor-sa', label: 'Uses', dashed: true },
+                { source: 'p2-processor-sa', target: 'p1-bucket', label: 'Reads from\n(needs objectViewer)', color: '#d32f2f', dashed: true },
+                { source: 'p2-processor-sa', target: 'p2-bucket', label: 'Writes to\n(has objectAdmin)', color: '#d32f2f', dashed: true },
+
+                // Phase 3
+                { source: 'p3-event', target: 'p3-storage', label: 'Triggers' },
+                { source: 'p3-storage', target: 'p3-pubsub', label: 'Publishes\nevent' },
+                { source: 'p3-pubsub', target: 'p3-invoker', label: 'Impersonates\n(generates token)', color: '#d32f2f', bold: true },
+                { source: 'p3-invoker', target: 'p3-function', label: 'Invokes\n(with auth token)' },
+                { source: 'p3-function', target: 'p3-bq', label: 'Loads to\n(as BQ loader SA)' },
+                { source: 'p3-function', target: 'p3-loader-sa', label: 'Uses', dashed: true },
+                { source: 'p3-loader-sa', target: 'p2-bucket', label: 'Reads from\n(needs objectViewer)', color: '#d32f2f', dashed: true },
+                { source: 'p3-loader-sa', target: 'p3-bq', label: 'Writes to\n(has dataEditor)', color: '#d32f2f', dashed: true },
+
+                // Cross-phase dependencies - Provisioning
+                { source: 'terraform-sa', target: 'cloudbuild-sa', label: 'Creates SA &\ngrants roles', color: '#d32f2f', bold: true },
+                { source: 'terraform-sa', target: 'p1-job', label: 'Creates job &\nSA permissions', color: '#d32f2f', bold: true },
+                { source: 'terraform-sa', target: 'p2-service', label: 'Creates service &\nSA permissions', color: '#d32f2f', bold: true },
+                { source: 'terraform-sa', target: 'p3-function', label: 'Creates function &\nSA permissions', color: '#d32f2f', bold: true },
+
+                // Cross-phase dependencies - Build
+                { source: 'cloudbuild-sa', target: 'p2-service', label: 'Builds &\ndeploys', color: '#ff9800', bold: true },
+
+                // Resource dependencies
+                { source: 'p1-bucket', target: 'p2-event', label: 'REQUIRED\nbefore Eventarc', color: '#ff6f00', bold: true, dependency: true },
+                { source: 'p2-bucket', target: 'p3-event', label: 'REQUIRED\nbefore Eventarc', color: '#ff6f00', bold: true, dependency: true },
+                { source: 'p3-bq', target: 'p3-function', label: 'REQUIRED\nbefore Function', color: '#ff6f00', bold: true, dependency: true },
+            ],
+            clusters: [
+                { id: 'provision', label: '1. Provision-Time (Terraform)', x: 20, y: 20, width: 240, height: 340, color: '#e3f2fd' },
+                { id: 'build', label: '2. Build-Time (Cloud Build)', x: 300, y: 20, width: 240, height: 340, color: '#fff3e0' },
+                { id: 'runtime', label: '3. Run-Time (Pipeline Execution)', x: 580, y: 10, width: 820, height: 740, color: '#f5f5f5' },
+                { id: 'phase1', label: 'Phase 1: Ingestion', x: 600, y: 40, width: 180, height: 440, color: '#e1f5ff', parent: 'runtime' },
+                { id: 'phase2', label: 'Phase 2: Processing', x: 810, y: 40, width: 180, height: 700, color: '#fff4e1', parent: 'runtime' },
+                { id: 'phase3', label: 'Phase 3: Loading', x: 1070, y: 40, width: 180, height: 700, color: '#e8f5e9', parent: 'runtime' },
+            ]
+        };
+
+        function initGraph() {
+            const container = d3.select('#graph-container');
+
+            svg = container.append('svg')
+                .attr('width', '100%')
+                .attr('height', '100%');
+
+            g = svg.append('g');
+
+            // Draw clusters (backgrounds)
+            graphData.clusters.forEach(cluster => {
+                const clusterG = g.append('g').attr('class', 'cluster');
+
+                clusterG.append('rect')
+                    .attr('x', cluster.x)
+                    .attr('y', cluster.y)
+                    .attr('width', cluster.width)
+                    .attr('height', cluster.height)
+                    .attr('fill', cluster.color)
+                    .attr('stroke', '#999')
+                    .attr('stroke-width', 2);
+
+                clusterG.append('text')
+                    .attr('x', cluster.x + cluster.width / 2)
+                    .attr('y', cluster.y + 25)
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', '#424242')
+                    .attr('font-weight', 'bold')
+                    .attr('font-size', '13px')
+                    .text(cluster.label);
+            });
+
+            // Draw edges with better routing
+            graphData.edges.forEach(edge => {
+                const source = graphData.nodes.find(n => n.id === edge.source);
+                const target = graphData.nodes.find(n => n.id === edge.target);
+
+                const edgeG = g.append('g').attr('class', 'edge');
+
+                // Calculate path based on positions
+                let path;
+                const dx = target.x - source.x;
+                const dy = target.y - source.y;
+
+                // Determine if we need a curved or straight path
+                if (Math.abs(dx) < 50) {
+                    // Vertical connection
+                    path = `M ${source.x} ${source.y + 40}
+                             L ${source.x} ${target.y - 40}`;
+                } else if (Math.abs(dy) < 50) {
+                    // Horizontal connection
+                    const midY = (source.y + target.y) / 2;
+                    path = `M ${source.x + 80} ${source.y}
+                             L ${target.x - 80} ${target.y}`;
+                } else {
+                    // Diagonal connection with curve
+                    const midX = (source.x + target.x) / 2;
+                    const midY = (source.y + target.y) / 2;
+                    path = `M ${source.x} ${source.y + 40}
+                             Q ${midX} ${midY} ${target.x} ${target.y - 40}`;
+                }
+
+                edgeG.append('path')
+                    .attr('d', path)
+                    .attr('stroke', edge.color || '#999')
+                    .attr('stroke-width', edge.bold ? 2.5 : 1.5)
+                    .attr('stroke-dasharray', edge.dashed ? '5,5' : 'none')
+                    .attr('fill', 'none')
+                    .attr('marker-end', 'url(#arrowhead)');
+
+                // Add label at midpoint
+                if (edge.label) {
+                    const midX = (source.x + target.x) / 2;
+                    const midY = (source.y + target.y) / 2;
+
+                    const text = edgeG.append('text')
+                        .attr('x', midX)
+                        .attr('y', midY)
+                        .attr('text-anchor', 'middle')
+                        .attr('dy', '-5')
+                        .attr('font-size', edge.dependency ? '9px' : '8px')
+                        .attr('fill', edge.dependency ? '#ff6f00' : (edge.color === '#d32f2f' ? '#d32f2f' : '#666'));
+
+                    // Handle multi-line labels
+                    const lines = edge.label.split('\n');
+                    lines.forEach((line, i) => {
+                        text.append('tspan')
+                            .attr('x', midX)
+                            .attr('dy', i === 0 ? 0 : '1.2em')
+                            .text(line);
+                    });
+                }
+            });
+
+            // Define arrowhead marker
+            const defs = svg.append('defs');
+            defs.append('marker')
+                .attr('id', 'arrowhead')
+                .attr('viewBox', '-10 -5 10 10')
+                .attr('refX', -8)
+                .attr('refY', 0)
+                .attr('orient', 'auto')
+                .attr('markerWidth', 6)
+                .attr('markerHeight', 6)
+                .append('path')
+                .attr('d', 'M-10,-5L0,0L-10,5')
+                .attr('fill', '#999');
+
+            // Draw nodes
+            graphData.nodes.forEach(node => {
+                const nodeG = g.append('g')
+                    .attr('class', 'node')
+                    .attr('transform', `translate(${node.x}, ${node.y})`)
+                    .style('cursor', node.file ? 'pointer' : 'default')
+                    .on('click', function() {
+                        if (node.file) {
+                            const info = `File: ${node.file}\n\n`;
+                            const perms = node.permissions ? `Permissions:\n${node.permissions}\n\n` : '';
+                            const deps = node.dependsOn ? `Dependencies:\n${node.dependsOn}` : '';
+                            alert(info + perms + deps);
+                        }
+                    });
+
+                const lines = node.label.split('\n');
+                const lineHeight = 12;
+                const padding = 8;
+                const textHeight = lines.length * lineHeight;
+                const rectHeight = textHeight + padding * 2;
+                const rectWidth = 160;
+
+                if (node.ellipse) {
+                    nodeG.append('ellipse')
+                        .attr('rx', 60)
+                        .attr('ry', 30)
+                        .attr('fill', node.color)
+                        .attr('stroke', '#666')
+                        .attr('stroke-width', 2)
+                        .attr('stroke-dasharray', node.dashed ? '3,3' : 'none');
+                } else {
+                    nodeG.append('rect')
+                        .attr('x', -rectWidth / 2)
+                        .attr('y', -rectHeight / 2)
+                        .attr('width', rectWidth)
+                        .attr('height', rectHeight)
+                        .attr('fill', node.color)
+                        .attr('stroke', '#666')
+                        .attr('stroke-width', 2)
+                        .attr('stroke-dasharray', node.dashed ? '3,3' : 'none');
+                }
+
+                lines.forEach((line, i) => {
+                    nodeG.append('text')
+                        .attr('text-anchor', 'middle')
+                        .attr('dy', (i - lines.length / 2 + 0.5) * lineHeight)
+                        .text(line);
+                });
+
+                // Add permission indicator
+                if (node.permissions) {
+                    nodeG.append('text')
+                        .attr('x', rectWidth / 2 - 5)
+                        .attr('y', -rectHeight / 2 - 5)
+                        .attr('text-anchor', 'end')
+                        .attr('fill', '#d32f2f')
+                        .attr('font-size', '16px')
+                        .attr('font-weight', 'bold')
+                        .text('🔑');
+                }
+
+                // Add dependency indicator
+                if (node.dependsOn) {
+                    nodeG.append('text')
+                        .attr('x', -rectWidth / 2 + 5)
+                        .attr('y', -rectHeight / 2 - 5)
+                        .attr('text-anchor', 'start')
+                        .attr('fill', '#ff6f00')
+                        .attr('font-size', '16px')
+                        .attr('font-weight', 'bold')
+                        .text('⚠');
+                }
+            });
+
+            // Setup zoom
+            zoom = d3.zoom()
+                .scaleExtent([0.1, 4])
+                .on('zoom', (event) => {
+                    g.attr('transform', event.transform);
+                });
+
+            svg.call(zoom);
+
+            // Fit to screen initially
+            setTimeout(fitToScreen, 100);
+        }
+
+        function zoomIn() {
+            svg.transition().duration(300).call(zoom.scaleBy, 1.3);
+        }
+
+        function zoomOut() {
+            svg.transition().duration(300).call(zoom.scaleBy, 0.7);
+        }
+
+        function resetZoom() {
+            svg.transition().duration(750).call(zoom.transform, d3.zoomIdentity);
+        }
+
+        function fitToScreen() {
+            const bounds = g.node().getBBox();
+            const containerWidth = window.innerWidth;
+            const containerHeight = window.innerHeight;
+
+            const scale = 0.9 / Math.max(
+                bounds.width / containerWidth,
+                bounds.height / containerHeight
+            );
+
+            const translateX = containerWidth / 2 - scale * (bounds.x + bounds.width / 2);
+            const translateY = containerHeight / 2 - scale * (bounds.y + bounds.height / 2);
+
+            svg.transition()
+                .duration(750)
+                .call(
+                    zoom.transform,
+                    d3.zoomIdentity.translate(translateX, translateY).scale(scale)
+                );
+        }
+
+        // Initialize on load
+        window.addEventListener('load', initGraph);
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            clearTimeout(window.resizeTimeout);
+            window.resizeTimeout = setTimeout(fitToScreen, 250);
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (event) => {
+            if (event.key === '+' || event.key === '=') zoomIn();
+            else if (event.key === '-') zoomOut();
+            else if (event.key === '0') resetZoom();
+            else if (event.key === 'f' || event.key === 'F') fitToScreen();
+        });
+    </script>
+</body>
+</html>

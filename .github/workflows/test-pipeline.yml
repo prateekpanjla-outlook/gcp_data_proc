@@ -1,0 +1,63 @@
+name: Deploy & Verify Test Pipeline
+
+on:
+  push:
+    branches: [test]
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: us-central1
+  ENVIRONMENT: test
+
+jobs:
+  deploy-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5"
+          terraform_wrapper: false
+
+      - name: Deploy all phases
+        run: |
+          chmod +x infrastructure/scripts/deploy-all-phases.sh
+          ./infrastructure/scripts/deploy-all-phases.sh "$PROJECT_ID" "$ENVIRONMENT" "$REGION"
+
+      - name: Trigger download job
+        run: |
+          gcloud run jobs execute ${ENVIRONMENT}-github-archive-download-gsutil \
+            --project="$PROJECT_ID" \
+            --region="$REGION" \
+            --wait
+
+      - name: Wait for pipeline to complete
+        run: |
+          echo "Waiting 3 minutes for Eventarc → Phase 2 → Phase 3..."
+          sleep 180
+
+      - name: Verify BigQuery rows
+        run: |
+          ROW_COUNT=$(bq query --nouse_legacy_sql --format=csv \
+            "SELECT COUNT(*) as c FROM \`${PROJECT_ID}.github_archive.github_events\`" \
+            2>/dev/null | tail -1)
+          echo "Rows loaded: $ROW_COUNT"
+          if [ "$ROW_COUNT" -gt 0 ]; then
+            echo "Pipeline verification PASSED"
+          else
+            echo "Pipeline verification FAILED - no rows in BigQuery"
+            exit 1
+          fi
