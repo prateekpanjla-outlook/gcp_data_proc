@@ -80,10 +80,12 @@ resource "google_cloud_run_v2_service" "processor" {
     # Timeout (duration format with 's' suffix)
     timeout = "3600s" # 1 hour
 
-    # TODO: determine safe concurrency for 50MB files with 4GB memory
-    # Peak per request: ~300MB decompression + ~100MB pandas chunk + overhead
-    # Lower concurrency = more instances needed for bursts = review min-instances (warm) count
-    max_instance_request_concurrency = 3
+    # One file per instance. Must equal gunicorn's workers x threads in
+    # Dockerfile.processor (1 x 1). A higher value lets Cloud Run send requests
+    # that then wait inside the container, unseen by the autoscaler, and one
+    # out-of-memory kill fails every request on the instance.
+    # Parallelism comes from max_instance_count; extra files wait in Pub/Sub.
+    max_instance_request_concurrency = 1
 
     containers {
       # Image for the processor service
