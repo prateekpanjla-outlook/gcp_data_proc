@@ -67,4 +67,4 @@ We use the custom SA as a security best practice: the default SA is over-permiss
    - Switches to `appuser`.
    - Exposes port 8080.
    - Adds a `HEALTHCHECK` that hits `http://localhost:8080/health` every 30 seconds (30s start period, 3 retries).
-   - **CMD**: Runs Gunicorn with 1 worker, 2 threads, 3600s timeout (for large file processing), binding to `0.0.0.0:8080`, launching `main:app`.
+   - **CMD**: Runs Gunicorn with 1 worker and 1 thread (one request at a time, matching Cloud Run concurrency 1), 3600s timeout (for large file processing), binding to `0.0.0.0:8080`, launching `main:app`.

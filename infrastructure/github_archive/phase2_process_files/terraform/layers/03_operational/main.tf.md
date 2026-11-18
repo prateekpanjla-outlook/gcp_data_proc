@@ -65,7 +65,7 @@ State is stored at `gs://beaming-glyph-489707-b8-terraform-state/terraform/state
 3. **Cloud Run v2 Service (lines 63-148):**
    - Name: `${env}-github-archive-processor`.
    - Uses Gen2 execution environment with a 1-hour timeout.
-   - Concurrency set to 3 requests per instance (with a TODO to tune based on memory usage).
+   - Concurrency set to 1 request per instance, matching gunicorn's single worker and thread in `Dockerfile.processor`.
    - Container image: `${region}-docker.pkg.dev/${project_id}/${env}-github-archive/processor:${image_tag}`.
    - Environment variables: `PROJECT_ID`, `LANDING_BUCKET`, `STAGING_BUCKET`, `FILE_SIZE_THRESHOLD_MB`, `CHUNKSIZE`.
    - Resources: configurable CPU and memory via variables; `cpu_idle = false` keeps CPU allocated for the full request duration.

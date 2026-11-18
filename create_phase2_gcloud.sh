@@ -142,7 +142,7 @@ steps:
       --cpu 2 \
       --timeout 3600s \
       --max-instances 5 \
-      --concurrency 3 \
+      --concurrency 1 \
       --set-env-vars PROJECT_ID=${PROJECT_ID},LANDING_BUCKET=${LANDING_BUCKET},STAGING_BUCKET=${STAGING_BUCKET},FILE_SIZE_THRESHOLD_MB=50,CHUNKSIZE=100000
 EOF
 
@@ -170,7 +170,7 @@ gcloud run deploy "${SERVICE_NAME}" \
     --timeout="3600s" \
     --min-instances=0 \
     --max-instances=5 \
-    --concurrency=3 \
+    --concurrency=1 \
     --ingress=all \
     --no-cpu-throttling=false \
     --labels="environment=${ENVIRONMENT},phase=processing,managed_by=gcloud_script" \

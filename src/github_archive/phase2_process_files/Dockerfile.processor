@@ -71,5 +71,7 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health').read()" || exit 1
 
-# Run the application with production WSGI server
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "2", "--timeout", "3600", "--access-logfile", "-", "--error-logfile", "-", "main:app"]
+# Run the application with production WSGI server.
+# One request at a time: Cloud Run concurrency is 1 (cloud_run_service.tf),
+# so workers x threads must be 1 x 1 to match.
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "1", "--timeout", "3600", "--access-logfile", "-", "--error-logfile", "-", "main:app"]

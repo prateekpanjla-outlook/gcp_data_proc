@@ -51,7 +51,7 @@ steps:
           --cpu 2 \
           --timeout 3600 \
           --max-instances 5 \
-          --concurrency 10 \
+          --concurrency 1 \
           --no-allow-unauthenticated \
           --service-account ${_ENVIRONMENT}-data-pipeline-processor@$PROJECT_ID.iam.gserviceaccount.com \
           --set-env-vars PROJECT_ID=$PROJECT_ID,LANDING_BUCKET=$PROJECT_ID-${_ENVIRONMENT}-data-pipeline-landing,STAGING_BUCKET=$PROJECT_ID-${_ENVIRONMENT}-data-pipeline-staging
